@@ -8,13 +8,25 @@ on:
         required: true
         default: 'https://webtv.feratel.com/webtv/?cam=15111'
       duration:
-        description: 'Duration (seconds) to capture (ensure one full rotation)'
+        description: 'Duration (sec) if DRAG_MODE=0'
         required: false
         default: '90'
       fps:
-        description: 'Frames per second to capture'
+        description: 'FPS if DRAG_MODE=0'
         required: false
         default: '2.0'
+      drag_steps:
+        description: 'Number of drag steps (DRAG_MODE=1)'
+        required: false
+        default: '84'
+      drag_px:
+        description: 'Pixels per step (DRAG_MODE=1)'
+        required: false
+        default: '28'
+      device_scale:
+        description: 'Device scale factor for crisp frames (2..3)'
+        required: false
+        default: '2'
 
 jobs:
   capture:
@@ -29,7 +41,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install system dependencies (for OpenCV/Chromium)
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libgl1 libglib2.0-0
@@ -40,9 +52,13 @@ jobs:
           pip install -r requirements.txt
           python -m playwright install --with-deps chromium
 
-      - name: Capture panorama (saves to images/)
+      - name: Capture panorama (drag mode; saves to images/)
         env:
           HEADLESS: "1"
+          DRAG_MODE: "1"
+          DRAG_STEPS: ${{ inputs.drag_steps }}
+          DRAG_PX: ${{ inputs.drag_px }}
+          DEVICE_SCALE: ${{ inputs.device_scale }}
         run: |
           mkdir -p images
           python feratel_pano_grabber.py "${{ inputs.url }}" images "${{ inputs.duration }}" "${{ inputs.fps }}"
