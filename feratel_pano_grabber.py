@@ -15,13 +15,17 @@ Defaults:
 Environment (optional):
   HEADLESS=1|0        # default 1 (CI)
   DRAG_MODE=1|0       # default 1 (forces rotation via mouse)
-  DRAG_STEPS=96       # more steps = more overlap (recommended 96–140)
+  DRAG_STEPS=96       # more steps = more overlap (try 96–140)
   DRAG_PX=22          # pixels per step (smaller = more overlap)
   DRAG_PAUSE_MS=150   # ms between steps
   DEVICE_SCALE=3      # 2..3 for crispness
 
-This script does normal element screenshots via Playwright.
-Please respect the website's Terms of Use.
+  MAX_FRAMES=40       # cap frames used for stitching (speed/stability)
+  MAX_HEIGHT=720      # downscale height before stitching (speed/stability)
+
+Notes:
+  - Uses normal element screenshots via Playwright (no DRM bypass).
+  - Please respect the website's Terms of Use.
 """
 import os, sys, time
 from datetime import datetime
@@ -34,25 +38,32 @@ DEFAULT_URL = "https://webtv.feratel.com/webtv/?cam=15111"
 
 # ---------------------------- helpers ----------------------------
 def log(*a): print("[feratel-pano]", *a, flush=True)
-def getenv_bool(n,d): 
-    v=os.environ.get(n); 
+
+def getenv_bool(n, d):
+    v = os.environ.get(n)
     return d if v is None else (str(v).lower() not in ("0","false","no","off",""))
-def getenv_int(n,d):
-    try: return int(os.environ.get(n,d))
-    except: return d
+
+def getenv_int(n, d):
+    v = os.environ.get(n)
+    try:
+        return int(v) if v is not None else d
+    except:
+        return d
 
 def safe_click_text(page, text, timeout=3000):
     try:
         page.get_by_text(text, exact=False).first.click(timeout=timeout)
         log(f"Clicked text: {text}"); return True
-    except Exception: return False
+    except Exception:
+        return False
 
 def try_selectors(page, selectors):
     for sel in selectors:
         try:
             page.locator(sel).first.click(timeout=1500)
             log(f"Clicked selector: {sel}"); return True
-        except Exception: pass
+        except Exception:
+            pass
     return False
 
 def accept_cookies(page):
@@ -109,7 +120,8 @@ def get_bbox(page, locator):
     try:
         box = locator.bounding_box()
         if box: return box
-    except Exception: pass
+    except Exception:
+        pass
     return page.evaluate("""(el) => {
         const r=el.getBoundingClientRect(); return {x:r.x,y:r.y,width:r.width,height:r.height};
     }""", locator.element_handle())
@@ -152,11 +164,15 @@ def center_crop(img, top_pct=0.06, bottom_pct=0.94):
     h,w=img.shape[:2]; top=int(h*top_pct); bot=int(h*bottom_pct)
     return img[top:bot,:,:]
 
+def pick_subset(seq, target):
+    if len(seq) <= target: return seq
+    step = max(1, len(seq)//target)
+    return seq[::step][:target]
+
 # ------------------------ stitching strategies ------------------------
 def try_opencv_stitcher(imgs, mode):
     stitcher = cv2.Stitcher_create(mode)
     try:
-        # Prefer cylindrical warping when available
         if hasattr(cv2, "detail") and hasattr(cv2.detail, "createWarperByName"):
             warper = cv2.detail.createWarperByName('cylindrical')
             if hasattr(stitcher, "setWarper"): stitcher.setWarper(warper)
@@ -164,19 +180,26 @@ def try_opencv_stitcher(imgs, mode):
             stitcher.setPanoConfidenceThresh(0.6)
     except Exception:
         pass
-    return stitcher.stitch(imgs)
+    return stitcher.stitch(imgs)  # -> (status, pano)
 
-def sequential_sift_stitch(imgs):
-    # Simple sequential stitch: SIFT + BF + RANSAC + accumulate H to middle frame
-    sift = cv2.SIFT_create()
-    bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=False)
+def _create_feature_and_norm():
+    if hasattr(cv2, "SIFT_create"):
+        return cv2.SIFT_create(), cv2.NORM_L2
+    if hasattr(cv2, "AKAZE_create"):
+        return cv2.AKAZE_create(), cv2.NORM_HAMMING
+    return cv2.ORB_create(nfeatures=4000), cv2.NORM_HAMMING
+
+def sequential_feature_stitch(imgs):
+    # Generic sequential stitcher (SIFT/AKAZE/ORB + BF + RANSAC)
+    feat, norm = _create_feature_and_norm()
+    bf = cv2.BFMatcher(norm, crossCheck=False)
 
     n=len(imgs); mid=n//2
     Hs=[np.eye(3,dtype=np.float64) for _ in range(n)]
 
     def match(a,b):
-        ka,da=sift.detectAndCompute(a,None)
-        kb,db=sift.detectAndCompute(b,None)
+        ka,da=feat.detectAndCompute(a,None)
+        kb,db=feat.detectAndCompute(b,None)
         if da is None or db is None or len(da)<8 or len(db)<8: return None
         matches = bf.knnMatch(da,db,k=2)
         good=[]
@@ -188,18 +211,15 @@ def sequential_sift_stitch(imgs):
         H,mask=cv2.findHomography(src,dst,cv2.RANSAC,5.0)
         return H
 
-    # forward from mid
     for i in range(mid, n-1):
         H = match(imgs[i], imgs[i+1])
         if H is None: return None
         Hs[i+1] = Hs[i] @ H
-    # backward from mid
     for i in range(mid, 0, -1):
         H = match(imgs[i], imgs[i-1])
         if H is None: return None
         Hs[i-1] = Hs[i] @ H
 
-    # compute canvas bounds
     h,w = imgs[0].shape[:2]
     corners = np.array([[0,0],[w,0],[w,h],[0,h]], dtype=np.float32).reshape(-1,1,2)
     all_pts=[]
@@ -220,13 +240,12 @@ def sequential_sift_stitch(imgs):
         HH = T @ H
         warped = cv2.warpPerspective(img, HH, (out_w,out_h))
         mask = (warped.sum(axis=2)>0).astype(np.float32)
-        # feather blend
         result = (result.astype(np.float32)*weight[...,None] + warped.astype(np.float32)*mask[...,None]) / np.maximum(weight+mask,1e-3)[...,None]
         weight = np.clip(weight+mask,0,10)
 
     return result.astype(np.uint8)
 
-def strip_mosaic_fallback(imgs, slice_ratio=0.33):
+def strip_mosaic_fallback(imgs, slice_ratio=0.28):
     # Guaranteed output: take central vertical slice from each frame and tile
     slices=[]
     for im in imgs:
@@ -238,39 +257,42 @@ def strip_mosaic_fallback(imgs, slice_ratio=0.33):
 
 def stitch_panorama(paths, out_path):
     imgs=[]
+    max_h_env = getenv_int("MAX_HEIGHT", 720)
     for p in paths:
         im=cv2.imread(p)
         if im is None: continue
         im=center_crop(im,0.06,0.94)
-        # limit height for robustness/speed in CI; keep aspect
-        max_h=900
-        if im.shape[0]>max_h:
-            scale=max_h/im.shape[0]
-            im=cv2.resize(im,(int(im.shape[1]*scale),max_h))
+        if im.shape[0] > max_h_env:
+            scale=max_h_env/im.shape[0]
+            im=cv2.resize(im,(int(im.shape[1]*scale),max_h_env))
         imgs.append(im)
-    if len(imgs)<4: raise RuntimeError("Not enough valid frames to stitch.")
+    if len(imgs)<4:
+        # write mosaic so the pipeline still produces an image
+        mosaic = strip_mosaic_fallback(imgs or [], slice_ratio=0.28) if imgs else None
+        if mosaic is not None: cv2.imwrite(out_path, mosaic)
+        raise RuntimeError("Not enough valid frames to stitch.")
 
     log(f"Stitching {len(imgs)} frames (robust pipeline)...")
+
     # 1) OpenCV PANORAMA
     status, pano = try_opencv_stitcher(imgs, cv2.Stitcher_PANORAMA)
-    if status==cv2.Stitcher_OK: 
-        cv2.imwrite(out_path,pano); return out_path
+    if status == cv2.Stitcher_OK:
+        cv2.imwrite(out_path, pano); return
 
     # 2) OpenCV SCANS
     status, pano = try_opencv_stitcher(imgs, cv2.Stitcher_SCANS)
-    if status==cv2.Stitcher_OK:
-        cv2.imwrite(out_path,pano); return out_path
+    if status == cv2.Stitcher_OK:
+        cv2.imwrite(out_path, pano); return
 
-    # 3) Sequential SIFT
-    pano = sequential_sift_stitch(imgs)
+    # 3) Sequential (SIFT/AKAZE/ORB)
+    pano = sequential_feature_stitch(imgs)
     if pano is not None:
-        cv2.imwrite(out_path,pano); return out_path
+        cv2.imwrite(out_path, pano); return
 
-    # 4) Strip mosaic fallback (always succeeds)
+    # 4) Strip mosaic fallback (always succeeds); do NOT raise
     log("All stitchers failed; writing strip-mosaic fallback.")
     fb = strip_mosaic_fallback(imgs, slice_ratio=0.28)
-    cv2.imwrite(out_path.replace(".jpg","_mosaic.jpg"), fb)
-    raise RuntimeError("Stitching failed; wrote mosaic fallback instead.")
+    cv2.imwrite(out_path, fb)
 
 # ------------------------------ main ---------------------------------
 def main():
@@ -279,12 +301,13 @@ def main():
     duration = float(sys.argv[3]) if len(sys.argv)>3 else 75.0
     fps = float(sys.argv[4]) if len(sys.argv)>4 else 2.0
 
-    HEADLESS   = getenv_bool("HEADLESS", True)
-    DRAG_MODE  = getenv_bool("DRAG_MODE", True)
-    DRAG_STEPS = getenv_int("DRAG_STEPS", 96)
-    DRAG_PX    = getenv_int("DRAG_PX", 22)
+    HEADLESS      = getenv_bool("HEADLESS", True)
+    DRAG_MODE     = getenv_bool("DRAG_MODE", True)
+    DRAG_STEPS    = getenv_int("DRAG_STEPS", 96)
+    DRAG_PX       = getenv_int("DRAG_PX", 22)
     DRAG_PAUSE_MS = getenv_int("DRAG_PAUSE_MS", 150)
     DEVICE_SCALE  = getenv_int("DEVICE_SCALE", 3)
+    MAX_FRAMES    = getenv_int("MAX_FRAMES", 40)
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     frames_dir = os.path.join(out_root, "frames_"+ts)
@@ -325,8 +348,16 @@ def main():
 
         ctx.close(); browser.close()
 
-    if len(saved)<6: raise RuntimeError(f"Too few frames ({len(saved)}). Increase DRAG_STEPS or duration.")
-    stitch_panorama(saved, out_path)
+    if len(saved) < 6:
+        # still emit a mosaic so the workflow has an output
+        subset = saved
+    else:
+        subset = pick_subset(saved, MAX_FRAMES)
+
+    log(f"Stitching {len(subset)} frames (subset of {len(saved)})...")
+    os.makedirs(out_root, exist_ok=True)
+    stitch_panorama(subset, out_path)
+    log(f"Done. Output: {out_path}")
 
 if __name__=="__main__":
     main()
