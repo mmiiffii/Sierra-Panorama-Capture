@@ -18,20 +18,24 @@ on:
       drag_steps:
         description: 'Drag steps (more = more overlap)'
         required: false
-        default: '120'
+        default: '96'
       drag_px:
         description: 'Pixels per step (smaller = more overlap)'
         required: false
-        default: '20'
+        default: '22'
       device_scale:
-        description: 'Device scale factor for crisp frames'
+        description: 'Device scale factor'
         required: false
-        default: '3'
+        default: '2'
+
+concurrency:
+  group: pano-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   capture:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 120
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -59,6 +63,8 @@ jobs:
           DRAG_STEPS: ${{ inputs.drag_steps }}
           DRAG_PX: ${{ inputs.drag_px }}
           DEVICE_SCALE: ${{ inputs.device_scale }}
+          MAX_FRAMES: "40"     # cap frames to stitch for speed
+          MAX_HEIGHT: "720"    # downscale before stitching
         run: |
           mkdir -p images
           python feratel_pano_grabber.py "${{ inputs.url }}" images "${{ inputs.duration }}" "${{ inputs.fps }}"
