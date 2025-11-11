@@ -39,17 +39,44 @@ jobs:
         env:
           OCR_LANG: "eng"
           CAM_TZ: "Europe/Madrid"
-          DEBUG_ROI: "0"   # set to "1" temporarily to save debug/roi_*.jpg crops
+          DEBUG_ROI: "0"
         run: |
           python -u scripts/feratel_capture_ocr.py
 
-      - name: Commit images if changed (safe rebase)
+      - name: Build manifests (per camera)
+        shell: bash
         run: |
-          if [ -n "$(git status --porcelain images)" ]; then
+          python - <<'PY'
+import os, json, re
+from pathlib import Path
+
+CAMS = ["borreguiles","stadium","satelite","veleta"]
+base = Path(".")
+man_dir = base / "docs" / "manifests"
+man_dir.mkdir(parents=True, exist_ok=True)
+
+pat = {c: re.compile(rf"^{re.escape(c)}_(\d{{6}})_(\d{{6}}).*\.jpe?g$", re.I) for c in CAMS}
+
+for cam in CAMS:
+    cam_dir = base / "images" / cam
+    items = []
+    if cam_dir.is_dir():
+        for name in sorted(os.listdir(cam_dir)):
+            if pat[cam].match(name):
+                items.append({"name": name, "path": f"images/{cam}/{name}"})
+    out = man_dir / f"{cam}.json"
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump(items, f, ensure_ascii=False)
+print("Manifests written to docs/manifests/*.json")
+PY
+
+      - name: Commit images + manifests (safe rebase)
+        run: |
+          if [ -n "$(git status --porcelain images docs/manifests)" ]; then
             git config user.name  "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add images
-            git commit -m "feratel: OCR capture $(date -u +'%Y-%m-%d %H:%M:%S UTC')" || true
+            git add images docs/manifests
+            git commit -m "feratel: OCR capture + manifests $(date -u +'%Y-%m-%d %H:%M:%S UTC')" || true
             for i in 1 2 3; do
               git fetch origin "${{ github.ref_name }}" || true
               git pull --rebase origin "${{ github.ref_name }}" || true
@@ -57,5 +84,5 @@ jobs:
               echo "Push retry $i failed; retrying…" && sleep 3
             done
           else
-            echo "No new images to commit."
+            echo "No changes to commit."
           fi
