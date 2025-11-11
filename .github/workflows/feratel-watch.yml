@@ -3,7 +3,7 @@ name: Feratel Camera Watcher
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "0 */6 * * *"   # safety restart every 6h (GitHub caps job runtime)
+    - cron: "0 */6 * * *"   # safety restart every 6 hours
 
 permissions:
   contents: write
@@ -15,9 +15,12 @@ concurrency:
 jobs:
   watch:
     runs-on: ubuntu-latest
-    timeout-minutes: 360   # hard cap (GitHub max 6h)
+    timeout-minutes: 360
     env:
-      CHECK_INTERVAL: "60"  # seconds between checks
+      SCRIPT_DIR: "scripts"   # <— scripts live here
+      CHECK_INTERVAL: "60"    # seconds between passes
+      REQUIRE_OCR: "0"        # set "1" to require OCR timestamp
+      OCR_LANG: "eng"         # e.g. 'eng+spa' if needed
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,14 +47,16 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Run watcher loop and commit on change
+      - name: Loop: grab once, commit if changed
         env:
+          REQUIRE_OCR: ${{ env.REQUIRE_OCR }}
+          OCR_LANG: ${{ env.OCR_LANG }}
           CHECK_INTERVAL: ${{ env.CHECK_INTERVAL }}
+          SCRIPT_DIR: ${{ env.SCRIPT_DIR }}
         run: |
-          end=$((SECONDS + 340*60))  # ~5h40m; leaves headroom before 6h cap
+          end=$((SECONDS + 340*60))  # ~5h40m
           while [ $SECONDS -lt $end ]; do
-            python feratel_cam_watcher.py
-            # commit only if images changed
+            python "$SCRIPT_DIR/feratel_cam_watcher.py"  # one pass
             if [ -n "$(git status --porcelain images)" ]; then
               git add images
               git commit -m "feratel: new images $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
