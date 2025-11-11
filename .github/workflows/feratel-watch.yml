@@ -1,26 +1,23 @@
-name: Feratel Camera Watcher
+name: Feratel – Watch & Trigger
 
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "0 */6 * * *"   # safety restart every 6 hours
+    - cron: "*/10 * * * *"   # every 10 minutes (adjust as you wish)
 
 permissions:
-  contents: write
+  contents: read
+  actions: write   # needed to dispatch another workflow
 
 concurrency:
-  group: feratel-watcher
+  group: feratel-watch
   cancel-in-progress: true
 
 jobs:
   watch:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
     env:
-      SCRIPT_DIR: "scripts"
-      CHECK_INTERVAL: "60"
-      REQUIRE_OCR: "0"     # set to "1" to skip saves when OCR fails
-      OCR_LANG: "eng"      # add langs if needed, e.g. "eng+spa"
+      CHECK_INTERVAL: "60"   # seconds between probes inside this run
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,46 +29,34 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install system deps (Tesseract for OCR)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y tesseract-ocr
-
-      - name: Install Python deps
+      - name: Install Python deps (probe only)
         run: |
           python -m pip install --upgrade pip
-          pip install requests numpy opencv-python-headless pytesseract
+          pip install requests
 
-      - name: Configure git
+      - name: Trigger initial capture immediately
         run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          curl -L -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/feratel-capture.yml/dispatches \
+            -d '{"ref":"${{ github.ref_name }}","inputs":{"reason":"watch-initial"}}'
 
-      - name: Bootstrap: save current image for each camera, then commit
+      - name: Loop: probe for changes; dispatch capture on change
         env:
-          REQUIRE_OCR: ${{ env.REQUIRE_OCR }}
-          OCR_LANG: ${{ env.OCR_LANG }}
-        run: |
-          python -u "$SCRIPT_DIR/feratel_cam_watcher.py" --bootstrap
-          if [ -n "$(git status --porcelain images)" ]; then
-            git add images
-            git commit -m "feratel: bootstrap $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
-            git push
-          fi
-
-      - name: Watch loop: check for changes and commit on update
-        env:
-          REQUIRE_OCR: ${{ env.REQUIRE_OCR }}
-          OCR_LANG: ${{ env.OCR_LANG }}
           CHECK_INTERVAL: ${{ env.CHECK_INTERVAL }}
         run: |
-          end=$((SECONDS + 340*60))  # ~5h40m
+          end=$((SECONDS + 55*60))  # ~55 minutes; schedule restarts every 10 min anyway
           while [ $SECONDS -lt $end ]; do
-            python -u "$SCRIPT_DIR/feratel_cam_watcher.py"
-            if [ -n "$(git status --porcelain images)" ]; then
-              git add images
-              git commit -m "feratel: new images $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
-              git push
+            changed=$(python -u scripts/feratel_probe_changes.py)
+            echo "probe changed=$changed"
+            if [ "$changed" = "true" ]; then
+              echo "Dispatching capture..."
+              curl -L -X POST \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                https://api.github.com/repos/${{ github.repository }}/actions/workflows/feratel-capture.yml/dispatches \
+                -d '{"ref":"${{ github.ref_name }}","inputs":{"reason":"watch-change"}}'
             fi
             sleep "${CHECK_INTERVAL}"
           done
