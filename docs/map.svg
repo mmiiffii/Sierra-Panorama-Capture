@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#0c1220"/>
+      <stop offset="1" stop-color="#0a0f1a"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="800" height="600" fill="url(#bg)"/>
+  <path d="M0 420 C 120 360, 180 340, 260 360 C 310 370, 360 330, 430 350 C 520 375, 600 320, 800 360 L800 600 L0 600 Z"
+        fill="#0f1a2c" stroke="#1f2d4d" stroke-width="2"/>
+  <text x="24" y="36" fill="#8fa0b6" font-size="20" font-family="system-ui, sans-serif">Sierra Nevada (schematic)</text>
+</svg>

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Camera • Sierra Nevada</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="./styles.css" />
+  <script defer src="./config.js"></script>
+  <script defer src="./app.js"></script>
+</head>
+<body class="layout">
+  <aside class="sidebar">
+    <header>
+      <h1 id="cam-title">Camera</h1>
+      <p class="muted">Click a pin or choose below</p>
+    </header>
+
+    <div class="map-wrap">
+      <object id="sn-map" type="image/svg+xml" data="./map.svg"></object>
+      <div id="map-markers"></div>
+    </div>
+
+    <nav id="cam-list" class="cam-list"></nav>
+  </aside>
+
+  <main class="content">
+    <section class="section">
+      <div class="toolbar">
+        <select id="cam-select"></select>
+        <button id="btn-load-more" class="btn">Load more</button>
+      </div>
+
+      <div id="hero" class="hero">
+        <img id="hero-img" alt="Latest frame" />
+        <div id="hero-meta" class="hero-meta"></div>
+      </div>
+
+      <div id="thumbs" class="thumb-row"></div>
+    </section>
+  </main>
+</body>
+</html>
