@@ -16,7 +16,10 @@ jobs:
   watch:
     runs-on: ubuntu-latest
     env:
-      CHECK_INTERVAL: "60"   # seconds between probes
+      CHECK_INTERVAL: "60"                      # seconds between probes
+      REPO: ${{ github.repository }}
+      REFNAME: ${{ github.ref_name }}
+      TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,21 +36,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      # Trigger the capture workflow once immediately so you get images right away
       - name: Trigger initial capture
-        env:
-          GH_TOKEN: ${{ github.token }}   # let gh use the GitHub token
+        shell: bash
         run: |
           gh api \
-            repos/${{ github.repository }}/actions/workflows/feratel-capture.yml/dispatches \
-            -f ref='${{ github.ref_name }}' \
+            -H "Authorization: Bearer $TOKEN" \
+            repos/$REPO/actions/workflows/feratel-capture.yml/dispatches \
+            -f ref="$REFNAME" \
             -f inputs[reason]='watch-initial'
 
-      # Probe in a lightweight loop; dispatch capture when any cam changes
       - name: Loop: probe and dispatch capture on change
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CHECK_INTERVAL: ${{ env.CHECK_INTERVAL }}
+        shell: bash
         run: |
           end=$((SECONDS + 55*60))  # ~55 minutes
           while [ $SECONDS -lt $end ]; do
@@ -55,8 +54,9 @@ jobs:
             echo "probe changed=$changed"
             if [ "$changed" = "true" ]; then
               gh api \
-                repos/${{ github.repository }}/actions/workflows/feratel-capture.yml/dispatches \
-                -f ref='${{ github.ref_name }}' \
+                -H "Authorization: Bearer $TOKEN" \
+                repos/$REPO/actions/workflows/feratel-capture.yml/dispatches \
+                -f ref="$REFNAME" \
                 -f inputs[reason]='watch-change'
             fi
             sleep "$CHECK_INTERVAL"
