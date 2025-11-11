@@ -9,11 +9,6 @@ permissions:
   actions: write
 
 jobs:
-  sanity:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "watch workflow loaded"
-jobs:
   watch:
     runs-on: ubuntu-latest
     env:
