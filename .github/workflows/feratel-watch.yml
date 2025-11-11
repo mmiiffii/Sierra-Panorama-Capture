@@ -1,19 +1,22 @@
 name: Feratel Watch
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
   schedule:
     - cron: "*/10 * * * *"  # every 10 minutes
 
 permissions:
-  contents: read
   actions: write
+  contents: read
+
+concurrency:
+  group: feratel-watch
+  cancel-in-progress: true
 
 jobs:
   watch:
     runs-on: ubuntu-latest
     env:
-      CHECK_INTERVAL: "60"   # seconds between probes inside this run
-      CAPTURE_WORKFLOW_FILE: "feratel-capture.yml"
+      CHECK_INTERVAL: "60"   # seconds between probes
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,27 +33,31 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
+      # Trigger the capture workflow once immediately so you get images right away
       - name: Trigger initial capture
+        env:
+          GH_TOKEN: ${{ github.token }}   # let gh use the GitHub token
         run: |
-          curl -sSL -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/${{ env.CAPTURE_WORKFLOW_FILE }}/dispatches" \
-            -d "{\"ref\":\"${{ github.ref_name }}\",\"inputs\":{\"reason\":\"watch-initial\"}}"
+          gh api \
+            repos/${{ github.repository }}/actions/workflows/feratel-capture.yml/dispatches \
+            -f ref='${{ github.ref_name }}' \
+            -f inputs[reason]='watch-initial'
 
-      - name: Loop: probe changes, dispatch capture on change
+      # Probe in a lightweight loop; dispatch capture when any cam changes
+      - name: Loop: probe and dispatch capture on change
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECK_INTERVAL: ${{ env.CHECK_INTERVAL }}
         run: |
-          end=$((SECONDS + 55*60))
+          end=$((SECONDS + 55*60))  # ~55 minutes
           while [ $SECONDS -lt $end ]; do
-            changed=$(python -u scripts/feratel_probe_changes.py)
+            changed=$(python -u scripts/feratel_probe_changes.py || echo false)
             echo "probe changed=$changed"
             if [ "$changed" = "true" ]; then
-              echo "Dispatching capture..."
-              curl -sSL -X POST \
-                -H "Accept: application/vnd.github+json" \
-                -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-                "https://api.github.com/repos/${{ github.repository }}/actions/workflows/${{ env.CAPTURE_WORKFLOW_FILE }}/dispatches" \
-                -d "{\"ref\":\"${{ github.ref_name }}\",\"inputs\":{\"reason\":\"watch-change\"}}"
+              gh api \
+                repos/${{ github.repository }}/actions/workflows/feratel-capture.yml/dispatches \
+                -f ref='${{ github.ref_name }}' \
+                -f inputs[reason]='watch-change'
             fi
-            sleep "${CHECK_INTERVAL}"
+            sleep "$CHECK_INTERVAL"
           done
