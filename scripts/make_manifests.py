@@ -1,26 +1,32 @@
 #!/usr/bin/env python3
 """
 Build docs/manifests/<cam>.json from images/<cam>/*.jpg.
-Optionally verify filenames vs OCR’d time in the bottom-right ROI.
+Optionally verify filenames vs OCR of the on-image timestamp (bottom-right ROI).
 
-It never errors if OCR libs aren’t installed; it will just skip verification.
-
-Usage:
+Usage (Codespaces):
   python scripts/make_manifests.py --write
   python scripts/make_manifests.py --write --verify-ocr
   python scripts/make_manifests.py --write --verify-ocr --rename-bad
+  python scripts/make_manifests.py --write --verify-ocr --debug-roi
+
+Notes:
+- Requires: opencv-python-headless, pytesseract, pyyaml (only if --verify-ocr)
+- Tesseract binary must exist in the container: `tesseract --version`
 """
 
 import os, re, json, argparse
 from pathlib import Path
+from typing import Dict, List, Tuple, Optional
 
-# Cameras you use
+# Cameras in this repo
 CAMS = ["borreguiles", "stadium", "satelite", "veleta"]
 
-# Default ROI (percentages) if no config present
+# Default ROI (percentages in [0..1]) if no config present
 DEFAULT_ROI = dict(top=0.90, left=0.85, bottom=0.985, right=0.995)
 
-def load_roi():
+# ---------- config / helpers ----------
+
+def load_roi() -> Dict[str, Dict[str, float]]:
     for p in ("config/roi.yml", "config/roi.yaml", "config/roi.json"):
         f = Path(p)
         if f.exists():
@@ -30,11 +36,12 @@ def load_roi():
                     return (yaml.safe_load(f.read_text(encoding="utf-8")) or {})
                 else:
                     return (json.loads(f.read_text(encoding="utf-8")) or {})
-            except Exception:
+            except Exception as e:
+                print(f"[warn] failed to read {p}: {e}")
                 return {}
     return {}
 
-def roi_for(cam, cfg):
+def roi_for(cam: str, cfg: Dict[str, Dict[str, float]]):
     r = cfg.get(cam, {})
     top = float(r.get("top", DEFAULT_ROI["top"]))
     left = float(r.get("left", DEFAULT_ROI["left"]))
@@ -43,11 +50,12 @@ def roi_for(cam, cfg):
     clamp = lambda x: min(max(x, 0.0), 1.0)
     return clamp(top), clamp(left), clamp(bottom), clamp(right)
 
-def parse_name(cam, name):
+def parse_name(cam: str, name: str) -> Optional[Tuple[str, str]]:
+    # <cam>_YYMMDD_HHMMSS*.jpg
     m = re.match(rf"^{re.escape(cam)}_(\d{{6}})_(\d{{6}})", name, re.I)
     return m.groups() if m else None
 
-def build_list_for_cam(cam, images_root: Path):
+def build_list_for_cam(cam: str, images_root: Path):
     cam_dir = images_root / cam
     if not cam_dir.is_dir():
         return []
@@ -65,7 +73,8 @@ def write_if_changed(p: Path, obj) -> bool:
         return True
     return False
 
-# ------------- Optional OCR verification -------------
+# ---------- OCR bits (only used when --verify-ocr) ----------
+
 def try_import_ocr():
     try:
         import cv2, numpy as np, pytesseract  # noqa: F401
@@ -73,24 +82,32 @@ def try_import_ocr():
     except Exception:
         return False
 
-def ocr_time(path: Path, roi_pct, ocr_lang="eng"):
-    import cv2, numpy as np, pytesseract, re
+def ocr_time(path: Path, roi_pct, ocr_lang="eng", debug=False):
+    import cv2, numpy as np, pytesseract
     b = path.read_bytes()
     arr = np.frombuffer(b, np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    if img is None: return None, "decode-failed"
+    if img is None:
+        return None, "decode-failed"
+
     H, W = img.shape[:2]
     top, left, bottom, right = roi_pct
     y0, y1 = int(H*top), int(H*bottom)
     x0, x1 = int(W*left), int(W*right)
-    if y1 <= y0 or x1 <= x0: return None, "bad-roi"
+    if y1 <= y0 or x1 <= x0:
+        return None, "bad-roi"
+
     roi = img[y0:y1, x0:x1]
 
-    # simple preprocessing
+    if debug:
+        dbg = Path("debug") / "verify"
+        dbg.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(dbg / f"roi_{path.name}"), roi)
+
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
     gray = cv2.convertScaleAbs(gray, alpha=1.9, beta=24)
     thr  = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)[1]
-
+    # Two PSMs for single-line text
     for psm in (7, 13):
         cfg = f"--psm {psm} -l {ocr_lang} -c tessedit_char_whitelist=0123456789:"
         try:
@@ -100,11 +117,12 @@ def ocr_time(path: Path, roi_pct, ocr_lang="eng"):
         txt = " ".join(txt.split())
         m = re.search(r"\b(\d{2}):(\d{2})(?::(\d{2}))?\b", txt)
         if m:
-            Hh, Mm, Ss = int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)
-            return (Hh, Mm, Ss), txt
+            hh, mm, ss = int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)
+            if 0 <= hh < 24 and 0 <= mm < 60 and 0 <= ss < 60:
+                return (hh, mm, ss), txt
     return None, "no-time-found"
 
-def verify_cam(cam, files, images_root: Path, roi_cfg, ocr_lang="eng"):
+def verify_cam(cam: str, files: List[dict], images_root: Path, roi_cfg, ocr_lang="eng", debug=False):
     problems = {"misnamed": [], "ocr_failed": []}
     roi = roi_for(cam, roi_cfg)
     for item in files:
@@ -112,15 +130,14 @@ def verify_cam(cam, files, images_root: Path, roi_cfg, ocr_lang="eng"):
         parsed = parse_name(cam, name)
         if not parsed:
             continue
-        d6, t6 = parsed
-        fH, fM, fS = int(t6[0:2]), int(t6[2:4]), int(t6[4:6])
-        path = images_root / cam / name
-        got, raw = ocr_time(path, roi, ocr_lang)
+        _, t6 = parsed
+        fH, fM, fS = int(t6[:2]), int(t6[2:4]), int(t6[4:6])
+        got, raw = ocr_time(images_root / cam / name, roi, ocr_lang, debug)
         if got is None:
             problems["ocr_failed"].append({"name": name, "reason": raw})
             continue
         oH, oM, oS = got
-        if (oH != fH) or (oM != fM) or (oS != fS):
+        if (oH, oM, oS) != (fH, fM, fS):
             problems["misnamed"].append({
                 "name": name,
                 "file_time": f"{fH:02d}:{fM:02d}:{fS:02d}",
@@ -129,78 +146,82 @@ def verify_cam(cam, files, images_root: Path, roi_cfg, ocr_lang="eng"):
             })
     return problems
 
-def maybe_rename(cam, problems, images_root: Path):
-    # rename misnamed to match OCR time; avoids clashes with a suffix
+def safe_rename(cam: str, problems, images_root: Path):
+    # rename misnamed to match OCR time (preserve date from filename)
+    out = []
     for m in problems["misnamed"]:
         old = images_root / cam / m["name"]
-        yy = m["name"][len(cam)+1:len(cam)+3]     # YY from filename (keep same day)
-        mo = m["name"][len(cam)+3:len(cam)+5]
-        dd = m["name"][len(cam)+5:len(cam)+7]
+        # date part: YYMMDD from original name
+        mo = re.match(rf"^{re.escape(cam)}_(\d{{6}})_(\d{{6}})", m["name"], re.I)
+        d6, _ = mo.groups()
+        yy, mm, dd = d6[:2], d6[2:4], d6[4:6]
         oH, oM, oS = m["ocr_time"].split(":")
-        new = f"{cam}_{yy}{mo}{dd}_{oH}{oM}{oS}.jpg"
+        new = f"{cam}_{yy}{mm}{dd}_{oH}{oM}{oS}.jpg"
         dst = images_root / cam / new
         if dst.exists():
             stem, ext = os.path.splitext(new); k = 1
-            while (images_root / cam / f"{stem}_{k}{ext}").exists(): k += 1
+            while (images_root / cam / f"{stem}_{k}{ext}").exists():
+                k += 1
             dst = images_root / cam / f"{stem}_{k}{ext}"
         old.rename(dst)
         m["renamed_to"] = dst.name
+        out.append((old.name, dst.name))
+    return out
+
+# ---------- main ----------
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--images", default="images")
     ap.add_argument("--docs",   default="docs")
-    ap.add_argument("--write", action="store_true")
-    ap.add_argument("--verify-ocr", action="store_true")
-    ap.add_argument("--rename-bad", action="store_true")
+    ap.add_argument("--write", action="store_true", help="write manifests to docs/manifests")
+    ap.add_argument("--verify-ocr", action="store_true", help="re-OCR filenames and report mismatches")
+    ap.add_argument("--rename-bad", action="store_true", help="rename files whose OCR time mismatches")
     ap.add_argument("--ocr-lang", default="eng")
+    ap.add_argument("--debug-roi", action="store_true")
     args = ap.parse_args()
 
     images_root = Path(args.images)
     manifests_root = Path(args.docs) / "manifests"
 
     roi_cfg = load_roi()
-    all_changed = False
-    report = {"cameras": {}, "renamed": False}
+    per_cam = {cam: build_list_for_cam(cam, images_root) for cam in CAMS}
 
-    # Build lists
-    per_cam = {}
-    for cam in CAMS:
-        per_cam[cam] = build_list_for_cam(cam, images_root)
-        if args.write:
+    any_changed = False
+    if args.write:
+        for cam, items in per_cam.items():
             out = manifests_root / f"{cam}.json"
-            changed = write_if_changed(out, per_cam[cam])
-            all_changed = all_changed or changed
+            any_changed |= write_if_changed(out, items)
+        any_changed |= write_if_changed(manifests_root / "index.json",
+                                        {c: f"{c}.json" for c in CAMS})
 
-    # Verify via OCR (optional, graceful if OCR libs missing)
-    if args.verify-ocr:
+    report = {"cameras": {}, "renamed": False}
+    if args.verify_ocr:  # <-- underscore attribute
         if not try_import_ocr():
             print("[warn] OCR libs not found (opencv/pytesseract). Skipping verification.")
         else:
             for cam in CAMS:
-                problems = verify_cam(cam, per_cam[cam], images_root, roi_cfg, args.ocr_lang)
-                report["cameras"][cam] = problems
-                if args.rename-bad and problems["misnamed"]:
-                    maybe_rename(cam, problems, images_root)
-                    report["renamed"] = True
-                    # rebuild list after renames
-                    per_cam[cam] = build_list_for_cam(cam, images_root)
-                    if args.write:
-                        out = manifests_root / f"{cam}.json"
-                        changed = write_if_changed(out, per_cam[cam])
-                        all_changed = all_changed or changed
-
-    # Write index + report
-    if args.write:
-        all_changed = write_if_changed(manifests_root / "index.json",
-                                       {c: f"{c}.json" for c in CAMS}) or all_changed
-        write_if_changed(manifests_root / "report.json", report)
+                probs = verify_cam(cam, per_cam[cam], images_root, roi_cfg, args.ocr_lang, args.debug_roi)
+                report["cameras"][cam] = probs
+                if args.rename_bad and probs["misnamed"]:
+                    renames = safe_rename(cam, probs, images_root)
+                    if renames:
+                        report["renamed"] = True
+                        # rebuild list + manifest after renames
+                        per_cam[cam] = build_list_for_cam(cam, images_root)
+                        if args.write:
+                            any_changed |= write_if_changed(manifests_root / f"{cam}.json", per_cam[cam])
+            if args.write:
+                write_if_changed(manifests_root / "report.json", report)
 
     # Console summary
-    print("manifests_written:", bool(args.write), "any_changed:", all_changed)
+    print("manifests_written:", bool(args.write), "any_changed:", any_changed)
     if report.get("cameras"):
         for cam, probs in report["cameras"].items():
             print(f"{cam:11s} misnamed={len(probs['misnamed']):3d}  ocr_failed={len(probs['ocr_failed']):3d}")
+            for m in probs["misnamed"][:5]:
+                print(f"  -> {m['name']}  file={m['file_time']}  ocr={m['ocr_time']}")
+    return 0
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
