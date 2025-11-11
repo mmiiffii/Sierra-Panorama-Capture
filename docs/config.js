@@ -2,8 +2,8 @@
 // docs/config.js
 // Update owner/repo/branch to match your repository before publishing.
 window.SN_CONFIG = {
-  owner: "YOUR_GITHUB_USERNAME_OR_ORG",
-  repo: "YOUR_REPO_NAME",
+  owner: "mmiiffii",
+  repo: "Sierra-Panorama-Capture",
   branch: "main",
 
   cameras: [
