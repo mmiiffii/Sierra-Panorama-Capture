@@ -4,7 +4,7 @@
 window.SN_CONFIG = {
   owner: "mmiiffii",
   repo: "Sierra-Panorama-Capture",
-  branch: "main",
+  branch: "main/docs",
 
   cameras: [
     { id: "borreguiles", name: "Borreguiles", dir: "images/borreguiles", mapPct: [0.58, 0.70] },
