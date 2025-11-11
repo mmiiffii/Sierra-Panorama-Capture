@@ -58,13 +58,15 @@ jobs:
 
       - name: Capture + stitch (saves to images/)
         env:
-          HEADLESS: "1"
-          DRAG_MODE: "1"
-          DRAG_STEPS: ${{ inputs.drag_steps }}
-          DRAG_PX: ${{ inputs.drag_px }}
-          DEVICE_SCALE: ${{ inputs.device_scale }}
-          MAX_FRAMES: "40"     # cap frames to stitch for speed
-          MAX_HEIGHT: "720"    # downscale before stitching
+           HEADLESS: "1"
+           DRAG_MODE: "1"
+           DRAG_STEPS: ${{ inputs.drag_steps }}   # e.g. 96–120
+           DRAG_PX: ${{ inputs.drag_px }}         # e.g. 20–24
+           DEVICE_SCALE: ${{ inputs.device_scale }}
+           MAX_FRAMES: "40" 
+           MAX_HEIGHT: "720"
+           STITCH_TIMEOUT_SEC: "90"
+           NUM_THREADS: "1"
         run: |
           mkdir -p images
           python feratel_pano_grabber.py "${{ inputs.url }}" images "${{ inputs.duration }}" "${{ inputs.fps }}"
