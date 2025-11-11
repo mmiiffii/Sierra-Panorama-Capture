@@ -59,14 +59,20 @@ jobs:
       - name: Capture + stitch (saves to images/)
         env:
            HEADLESS: "1"
-           DRAG_MODE: "1"
-           DRAG_STEPS: ${{ inputs.drag_steps }}   # e.g. 96–120
-           DRAG_PX: ${{ inputs.drag_px }}         # e.g. 20–24
-           DEVICE_SCALE: ${{ inputs.device_scale }}
-           MAX_FRAMES: "40" 
-           MAX_HEIGHT: "720"
-           STITCH_TIMEOUT_SEC: "90"
-           NUM_THREADS: "1"
+  AUTO_SCAN: "1"
+  DRAG_MODE: "1"
+  TARGET_FRAMES: "16"
+  MAX_FRAMES: "16"
+  DEVICE_SCALE: "2"
+  SAVE_FORMAT: "jpg"
+  JPEG_QUALITY: "88"
+  MAX_HEIGHT: "720"
+  CROP_TOP_PCT: "0.08"
+  CROP_BOTTOM_PCT: "0.92"
+  CROP_LEFT_PCT: "0.03"
+  CROP_RIGHT_PCT: "0.97"
+  STITCH_TIMEOUT_SEC: "90"
+  NUM_THREADS: "1"
         run: |
           mkdir -p images
           python feratel_pano_grabber.py "${{ inputs.url }}" images "${{ inputs.duration }}" "${{ inputs.fps }}"
