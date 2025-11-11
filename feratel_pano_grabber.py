@@ -13,15 +13,15 @@ Defaults:
   FPS           = 2.0
 
 Environment (optional):
-  HEADLESS=1|0        # default 1 (CI)
-  DRAG_MODE=1|0       # default 1 (forces rotation via mouse)
-  DRAG_STEPS=96       # more steps = more overlap (try 96–140)
-  DRAG_PX=22          # pixels per step (smaller = more overlap)
-  DRAG_PAUSE_MS=150   # ms between steps
-  DEVICE_SCALE=3      # 2..3 for crispness
-
-  MAX_FRAMES=40       # cap frames used for stitching (speed/stability)
-  MAX_HEIGHT=720      # downscale height before stitching (speed/stability)
+  HEADLESS: "1"
+  DRAG_MODE: "1"
+  DRAG_STEPS: ${{ inputs.drag_steps }}   # e.g. 96–120
+  DRAG_PX: ${{ inputs.drag_px }}         # e.g. 20–24
+  DEVICE_SCALE: ${{ inputs.device_scale }}
+  MAX_FRAMES: "40"
+  MAX_HEIGHT: "720"
+  STITCH_TIMEOUT_SEC: "90"
+  NUM_THREADS: "1"
 
 Notes:
   - Uses normal element screenshots via Playwright (no DRM bypass).
