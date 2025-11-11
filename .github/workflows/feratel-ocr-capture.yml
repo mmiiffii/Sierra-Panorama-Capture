@@ -1,4 +1,4 @@
-name: Feratel – OCR Capture
+name: Capture - OCR (5Min)
 on:
   workflow_dispatch:
   schedule:
