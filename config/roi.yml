@@ -1,4 +1,4 @@
-borreguiles: {top: 0.86, left: 0.78, bottom: 0.98, right: 0.98}
-stadium:     {top: 0.86, left: 0.78, bottom: 0.98, right: 0.98}
-satelite:    {top: 0.86, left: 0.78, bottom: 0.98, right: 0.98}
-veleta:      {top: 0.86, left: 0.78, bottom: 0.98, right: 0.98}
+borreguiles: {top: 0.93, left: 0.93, bottom: 0.99, right: 0.995}
+stadium:     {top: 0.93, left: 0.93, bottom: 0.99, right: 0.995}
+satelite:    {top: 0.93, left: 0.93, bottom: 0.99, right: 0.995}
+veleta:      {top: 0.93, left: 0.93, bottom: 0.99, right: 0.995}
