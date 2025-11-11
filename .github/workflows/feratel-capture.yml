@@ -37,7 +37,7 @@ jobs:
 
       - name: Run capture (all cams, ignore duplicates)
         env:
-          REQUIRE_OCR: "0"   # set to "1" to require overlay timestamp
+          REQUIRE_OCR: "1"   # set to "1" to require overlay timestamp
           OCR_LANG: "eng"
         run: |
           python -u scripts/feratel_capture.py
