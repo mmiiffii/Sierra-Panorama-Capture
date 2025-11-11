@@ -1,55 +1,89 @@
-name: Feratel – Capture
+#!/usr/bin/env python3
+"""
+Capture all Feratel JPG webcams once:
+- For each camera, fetch image bytes (cache-busted).
+- If bytes differ from the last saved image for that camera, save a new file
+  to images/<cam>/<cam>_YYMMDD_HHMMSS.jpg
+- Filename time comes from the overlay (OCR) taken from the BOTTOM-RIGHT ROI ONLY.
+  If OCR fails and REQUIRE_OCR=0, fall back to current UTC.
 
-on:
-  workflow_dispatch:
-    inputs:
-      reason:
-        description: 'Why capture was triggered'
-        required: false
-        default: 'manual-or-watch'
+Env:
+  REQUIRE_OCR=0|1   (default 0 -> allow UTC fallback if OCR fails)
+  OCR_LANG=eng      (e.g. 'eng+spa')
+  # ROI as percentages [0..1] (BOTTOM-RIGHT rectangle):
+  ROI_TOP=0.82
+  ROI_LEFT=0.55
+  ROI_BOTTOM=0.98
+  ROI_RIGHT=0.98
+"""
 
-permissions:
-  contents: write
+import os, glob, re, hashlib, requests, time
+from datetime import datetime, timezone
+import numpy as np
+import cv2
 
-jobs:
-  capture:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+CAMS = {
+    "borreguiles": "https://wtvpict.feratel.com/picture/35/15111.jpeg",
+    "stadium":     "https://wtvpict.feratel.com/picture/35/15112.jpeg",
+    "satelite":    "https://webtvhotspot.feratel.com/hotspot/35/15111/0.jpeg",
+    "veleta":      "https://webtvhotspot.feratel.com/hotspot/35/15112/1.jpeg",
+}
+BASE_DIR = "images"
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (FeratelCapture/1.1)",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+}
+TIMEOUT = 20
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+REQUIRE_OCR = os.environ.get("REQUIRE_OCR", "0").lower() in ("1","true","yes")
+OCR_LANG = os.environ.get("OCR_LANG", "eng")
 
-      - name: Install system deps (Tesseract for OCR)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y tesseract-ocr
+ROI_TOP = float(os.environ.get("ROI_TOP", "0.82"))
+ROI_LEFT = float(os.environ.get("ROI_LEFT", "0.55"))
+ROI_BOTTOM = float(os.environ.get("ROI_BOTTOM", "0.98"))
+ROI_RIGHT = float(os.environ.get("ROI_RIGHT", "0.98"))
 
-      - name: Install Python deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests numpy opencv-python-headless pytesseract
+try:
+    import pytesseract
+    OCR_AVAILABLE = True
+except Exception:
+    OCR_AVAILABLE = False
 
-      - name: Run capture (all cams, ignore duplicates)
-        env:
-          REQUIRE_OCR: "1"   # set to "1" to require overlay timestamp
-          OCR_LANG: "eng"
-        run: |
-          python -u scripts/feratel_capture.py
 
-      - name: Commit images if changed
-        run: |
-          if [ -n "$(git status --porcelain images)" ]; then
-            git config user.name  "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add images
-            git commit -m "feratel: captured images ($(date -u +'%Y-%m-%d %H:%M:%S UTC'))"
-            git push
-          else
-            echo "No new images to commit."
-          fi
+def ensure_dir(p): os.makedirs(p, exist_ok=True)
+def log(*a): print(*a, flush=True)
+
+def md5_bytes(b: bytes) -> str:
+    h = hashlib.md5(); h.update(b); return h.hexdigest()
+
+def fetch(url: str) -> bytes | None:
+    # add a cache-busting query param so CDNs don't serve stale bytes
+    sep = "&" if "?" in url else "?"
+    bust = f"{sep}_ts={int(time.time())}"
+    try:
+        r = requests.get(url + bust, headers=HEADERS, timeout=TIMEOUT)
+        if r.status_code == 200:
+            return r.content
+    except Exception:
+        return None
+    return None
+
+def latest_saved_path(cam: str) -> str | None:
+    files = sorted(glob.glob(os.path.join(BASE_DIR, cam, f"{cam}_*.jpg")))
+    return files[-1] if files else None
+
+def latest_saved_md5(cam: str) -> str | None:
+    p = latest_saved_path(cam)
+    if not p: return None
+    try:
+        with open(p, "rb") as f: return md5_bytes(f.read())
+    except Exception: return None
+
+
+# ---------- OCR (bottom-right only) ----------
+def ocr_bottom_right(b: bytes) -> str:
+    """Read only the bottom-right overlay area (faster & more reliable)."""
+    if not OCR_AVAILABLE:
+        return ""
+    arr = np.frombuffer(b, np.uint8)
