@@ -1,4 +1,4 @@
-name: Feratel – OCR Capture
+name: Feratel OCR Capture
 on:
   workflow_dispatch:
   schedule:
@@ -35,7 +35,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests numpy opencv-python-headless pytesseract pyyaml
 
-      - name: Run OCR capture
+      - name: OCR capture (writes only when timestamp is new)
         env:
           OCR_LANG: "eng"
           CAM_TZ: "Europe/Madrid"
@@ -43,7 +43,7 @@ jobs:
         run: |
           python -u scripts/feratel_capture_ocr.py
 
-      - name: Build manifests (per camera)
+      - name: Build manifests (always)
         shell: bash
         run: |
           python - <<'PY'
@@ -55,8 +55,23 @@ base = Path(".")
 man_dir = base / "docs" / "manifests"
 man_dir.mkdir(parents=True, exist_ok=True)
 
+# compile patterns
 pat = {c: re.compile(rf"^{re.escape(c)}_(\d{{6}})_(\d{{6}}).*\.jpe?g$", re.I) for c in CAMS}
 
+def write_if_changed(path, obj):
+    data = json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+    old = None
+    if path.exists():
+        try:
+            old = path.read_text(encoding="utf-8")
+        except Exception:
+            pass
+    if old != data:
+        path.write_text(data, encoding="utf-8")
+        return True
+    return False
+
+changed = False
 for cam in CAMS:
     cam_dir = base / "images" / cam
     items = []
@@ -65,23 +80,29 @@ for cam in CAMS:
             if pat[cam].match(name):
                 items.append({"name": name, "path": f"images/{cam}/{name}"})
     out = man_dir / f"{cam}.json"
-    with open(out, "w", encoding="utf-8") as f:
-        json.dump(items, f, ensure_ascii=False)
-print("Manifests written to docs/manifests/*.json")
+    if write_if_changed(out, items):
+        changed = True
+
+# create a simple index manifest too (optional)
+all_out = man_dir / "index.json"
+if write_if_changed(all_out, {c: f"{c}.json" for c in CAMS}):
+    changed = True
+
+print("manifests_changed=", changed)
 PY
 
-      - name: Commit images + manifests (safe rebase)
+      - name: Commit images and manifests (safe rebase)
         run: |
           if [ -n "$(git status --porcelain images docs/manifests)" ]; then
             git config user.name  "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add images docs/manifests
-            git commit -m "feratel: OCR capture + manifests $(date -u +'%Y-%m-%d %H:%M:%S UTC')" || true
+            git commit -m "feratel: capture + manifests $(date -u +'%Y-%m-%d %H:%M:%S UTC')" || true
             for i in 1 2 3; do
               git fetch origin "${{ github.ref_name }}" || true
               git pull --rebase origin "${{ github.ref_name }}" || true
               git push origin HEAD:"${{ github.ref_name }}" && break
-              echo "Push retry $i failed; retrying…" && sleep 3
+              echo "Push retry $i failed; retrying..." && sleep 3
             done
           else
             echo "No changes to commit."
