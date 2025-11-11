@@ -1,9 +1,8 @@
 name: Feratel – OCR Capture
-
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *"   # run every 5 minutes (adjust as you like)
+    - cron: "*/5 * * * *"  # every 5 minutes
 
 permissions:
   contents: write
@@ -26,20 +25,21 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install system deps (Tesseract OCR)
+      - name: Install system deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y tesseract-ocr
+          sudo apt-get install -y tesseract-ocr tzdata
 
       - name: Install Python deps
         run: |
           python -m pip install --upgrade pip
           pip install requests numpy opencv-python-headless pytesseract pyyaml
 
-      - name: Run OCR capture (writes only if timestamp is new)
+      - name: Run OCR capture
         env:
-          OCR_LANG: "eng"      # e.g. 'eng+spa' if needed
-          DEBUG_ROI: "0"       # set to "1" once to see ./debug/roi_*.jpg crops
+          OCR_LANG: "eng"
+          CAM_TZ: "Europe/Madrid"
+          DEBUG_ROI: "0"   # set to "1" temporarily to save debug/roi_*.jpg crops
         run: |
           python -u scripts/feratel_capture_ocr.py
 
@@ -50,12 +50,11 @@ jobs:
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add images
             git commit -m "feratel: OCR capture $(date -u +'%Y-%m-%d %H:%M:%S UTC')" || true
-            # handle non-fast-forward pushes
             for i in 1 2 3; do
               git fetch origin "${{ github.ref_name }}" || true
               git pull --rebase origin "${{ github.ref_name }}" || true
               git push origin HEAD:"${{ github.ref_name }}" && break
-              echo "Push retry $i failed; retrying..." && sleep 3
+              echo "Push retry $i failed; retrying…" && sleep 3
             done
           else
             echo "No new images to commit."
