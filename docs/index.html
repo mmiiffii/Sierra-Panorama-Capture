@@ -1,33 +1,193 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Sierra Nevada Cams</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="./styles.css" />
-  <script defer src="./config.js"></script>
-  <script defer src="./app.js"></script>
+<meta charset="utf-8" />
+<title>Sierra Nevada Cams</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root{
+    --bg:#0b0d12; --panel:#12151c; --text:#e7edf6; --muted:#8fa0b6;
+    --accent:#78b7ff; --card:#151926; --border:#20283a;
+  }
+  *{box-sizing:border-box} html,body{height:100%} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,"Helvetica Neue",sans-serif}
+  .wrap{max-width:1200px;margin:0 auto;padding:16px}
+  header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px}
+  h1{margin:0;font-size:18px}
+  .cam-buttons{display:flex;gap:8px;flex-wrap:wrap}
+  .btn{border:1px solid var(--border);background:var(--card);color:var(--text);padding:8px 12px;border-radius:10px;cursor:pointer}
+  .btn.active,.btn:hover{border-color:var(--accent)}
+  .viewer{background:#0e1118;border:1px solid var(--border);border-radius:12px;padding:10px}
+  .hero{position:relative;background:#0a0f18;border-radius:8px;overflow:hidden}
+  .hero img{width:100%;display:block;max-height:70vh;object-fit:contain;background:#0a0f18}
+  .controls{display:flex;gap:8px;align-items:center;margin:10px 0}
+  .ctrl-btn{border:1px solid var(--border);background:var(--panel);color:var(--text);padding:6px 10px;border-radius:8px;cursor:pointer}
+  .ctrl-btn:hover{border-color:var(--accent)}
+  .range{flex:1}
+  .meta{display:flex;justify-content:space-between;gap:10px;color:var(--muted);font-size:13px;margin-top:6px}
+  .empty{padding:30px;text-align:center;color:var(--muted)}
+  .foot{color:var(--muted);margin-top:8px;font-size:12px}
+  a{color:var(--accent);text-decoration:none}
+</style>
 </head>
-<body class="layout">
-  <aside class="sidebar">
-    <header>
-      <h1>Sierra Nevada</h1>
-      <p class="muted">Quick map • click a pin</p>
-    </header>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Sierra Nevada Cams</h1>
+    <div class="cam-buttons" id="camButtons"></div>
+  </header>
 
-    <div class="map-wrap">
-      <object id="sn-map" type="image/svg+xml" data="./map.svg"></object>
-      <div id="map-markers"></div>
+  <section class="viewer">
+    <div class="hero"><img id="hero" alt="camera frame"></div>
+
+    <div class="controls">
+      <button id="prev" class="ctrl-btn" title="Previous">⟨ Prev</button>
+      <input id="slider" class="range" type="range" min="0" max="0" step="1" value="0" disabled>
+      <button id="next" class="ctrl-btn" title="Next">Next ⟩</button>
     </div>
 
-    <nav id="cam-list" class="cam-list"></nav>
-  </aside>
+    <div class="meta">
+      <div id="metaName">—</div>
+      <div id="metaTime">—</div>
+    </div>
 
-  <main class="content">
-    <section class="section">
-      <h2 class="section-title">Cameras</h2>
-      <div id="card-grid" class="card-grid"></div>
-    </section>
-  </main>
+    <div id="empty" class="empty" style="display:none">No images found yet for this camera.</div>
+    <div class="foot">Images load directly from the repo. Filenames are <code>&lt;cam&gt;_YYMMDD_HHMMSS.jpg</code>.</div>
+  </section>
+</div>
+
+<script>
+/*** CONFIG — set these to your repo ***/
+const CONFIG = {
+  owner: "YOUR_GITHUB_USERNAME_OR_ORG",
+  repo:  "YOUR_REPO_NAME",
+  branch:"main",
+  cameras: [
+    { id:"borreguiles", name:"Borreguiles", dir:"images/borreguiles" },
+    { id:"stadium",     name:"Stadium",     dir:"images/stadium" },
+    { id:"satelite",    name:"Satelite",    dir:"images/satelite" },
+    { id:"veleta",      name:"Veleta",      dir:"images/veleta" },
+  ],
+  defaultCam: "borreguiles"
+};
+/*** END CONFIG ***/
+
+const elButtons = document.getElementById('camButtons');
+const elHero = document.getElementById('hero');
+const elSlider = document.getElementById('slider');
+const elPrev = document.getElementById('prev');
+const elNext = document.getElementById('next');
+const elMetaName = document.getElementById('metaName');
+const elMetaTime = document.getElementById('metaTime');
+const elEmpty = document.getElementById('empty');
+
+const RAW = (path) => `https://raw.githubusercontent.com/${CONFIG.owner}/${CONFIG.repo}/${CONFIG.branch}/${path}`;
+const API = (path) => `https://api.github.com/repos/${CONFIG.owner}/${CONFIG.repo}/contents/${path}?ref=${CONFIG.branch}`;
+
+let state = {
+  camId: CONFIG.defaultCam,
+  files: [],
+  index: 0,
+};
+
+function getCam(id){ return CONFIG.cameras.find(c=>c.id===id); }
+
+function parseTs(name, camId){
+  // <cam>_YYMMDD_HHMMSS(.anything).jpg
+  const rx = new RegExp("^"+camId+"_(\\d{6})_(\\d{6})","i");
+  const m = name.match(rx);
+  if(!m) return null;
+  const d=m[1], t=m[2];
+  const y = 2000 + parseInt(d.slice(0,2),10);
+  const mo= parseInt(d.slice(2,4),10)-1;
+  const da= parseInt(d.slice(4,6),10);
+  const hh= parseInt(t.slice(0,2),10);
+  const mi= parseInt(t.slice(2,4),10);
+  const ss= parseInt(t.slice(4,6),10);
+  return new Date(Date.UTC(y,mo,da,hh,mi,ss));
+}
+function fmt(dt){
+  if(!dt) return "—";
+  const p=n=>String(n).padStart(2,"0");
+  return `${dt.getUTCFullYear()}-${p(dt.getUTCMonth()+1)}-${p(dt.getUTCDate())} ${p(dt.getUTCHours())}:${p(dt.getUTCMinutes())}:${p(dt.getUTCSeconds())} UTC`;
+}
+
+async function listImages(cam){
+  const res = await fetch(API(cam.dir), {headers:{'Accept':'application/vnd.github+json'}});
+  if(!res.ok) return [];
+  const data = await res.json();
+  return (Array.isArray(data)?data:[])
+    .filter(x=>x.type==="file" && /\.jpe?g$/i.test(x.name))
+    .map(x=>({name:x.name, path:`${cam.dir}/${x.name}`}))
+    .sort((a,b)=>a.name.localeCompare(b.name));
+}
+
+function setActiveButton(camId){
+  [...elButtons.querySelectorAll('.btn')].forEach(b=>{
+    b.classList.toggle('active', b.dataset.cam===camId);
+  });
+}
+
+function updateViewer(){
+  const cam = getCam(state.camId);
+  elMetaName.textContent = cam ? cam.name : state.camId;
+  if(state.files.length===0){
+    elHero.src = "";
+    elSlider.disabled = true;
+    elPrev.disabled = elNext.disabled = true;
+    elMetaTime.textContent = "—";
+    elEmpty.style.display = "";
+    return;
+  }
+  elEmpty.style.display = "none";
+  if(state.index < 0) state.index = 0;
+  if(state.index >= state.files.length) state.index = state.files.length-1;
+  const f = state.files[state.index];
+  elHero.src = RAW(f.path);
+  const dt = parseTs(f.name, state.camId);
+  elMetaTime.textContent = fmt(dt);
+  elSlider.disabled = false;
+  elSlider.min = "0";
+  elSlider.max = String(state.files.length-1);
+  elSlider.value = String(state.index);
+  elPrev.disabled = (state.index<=0);
+  elNext.disabled = (state.index>=state.files.length-1);
+}
+
+async function loadCamera(camId){
+  state.camId = camId;
+  setActiveButton(camId);
+  const cam = getCam(camId);
+  state.files = await listImages(cam);
+  state.index = Math.max(0, state.files.length-1); // jump to latest
+  updateViewer();
+}
+
+function setupUI(){
+  // Buttons
+  elButtons.innerHTML = CONFIG.cameras.map(c=>`<button class="btn" data-cam="${c.id}">${c.name}</button>`).join("");
+  elButtons.addEventListener('click', (e)=>{
+    const b = e.target.closest('.btn'); if(!b) return;
+    const camId = b.dataset.cam;
+    history.replaceState(null,"",`?cam=${encodeURIComponent(camId)}`);
+    loadCamera(camId);
+  });
+  // Controls
+  elPrev.addEventListener('click', ()=>{ state.index--; updateViewer(); });
+  elNext.addEventListener('click', ()=>{ state.index++; updateViewer(); });
+  elSlider.addEventListener('input', ()=>{ state.index = parseInt(elSlider.value,10)||0; updateViewer(); });
+  window.addEventListener('keydown', (e)=>{
+    if(e.key==="ArrowLeft"){ if(state.index>0){ state.index--; updateViewer(); } }
+    if(e.key==="ArrowRight"){ if(state.index<state.files.length-1){ state.index++; updateViewer(); } }
+  });
+}
+
+(async function init(){
+  setupUI();
+  // default from URL ?cam=..., else configured default
+  const paramCam = new URLSearchParams(location.search).get('cam');
+  const initial = getCam(paramCam) ? paramCam : CONFIG.defaultCam;
+  await loadCamera(initial);
+})();
+</script>
 </body>
 </html>
