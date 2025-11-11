@@ -1,4 +1,4 @@
-name: Manifests – Build & Verify
+name: Manifests - Build & Verify
 
 on:
   workflow_dispatch:
@@ -59,8 +59,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install opencv-python-headless pytesseract pyyaml
 
-      - name: Build manifests (+ optional OCR verify/rename)
+      - name: Build manifests (and optional OCR verify/rename)
         env:
+          # map dispatch inputs to shell vars (avoid ${{ }} inside the script)
           OCR_VERIFY: ${{ github.event.inputs.ocr_verify }}
           RENAME_BAD: ${{ github.event.inputs.rename_bad }}
           DEBUG_ROI:  ${{ github.event.inputs.debug_roi }}
@@ -68,24 +69,33 @@ jobs:
         run: |
           set -euo pipefail
           FLAGS="--write"
-          # If rename is On but verify is Off, force verify On (rename requires OCR results)
-          if [ "${RENAME_BAD}" = "On" ] && [ "${OCR_VERIFY}" = "Off" ]; then
+          # ensure rename implies verify
+          if [ "$RENAME_BAD" = "On" ] && [ "$OCR_VERIFY" = "Off" ]; then
             OCR_VERIFY="On"
           fi
-          [ "${OCR_VERIFY}" = "On" ] && FLAGS="$FLAGS --verify-ocr"
-          [ "${RENAME_BAD}" = "On" ] && FLAGS="$FLAGS --rename-bad"
-          [ "${DEBUG_ROI}"  = "On" ] && FLAGS="$FLAGS --debug-roi"
-          echo "Running: python scripts/make_manifests.py $FLAGS --ocr-lang '${OCR_LANG}'"
-          python -u scripts/make_manifests.py $FLAGS --ocr-lang "${OCR_LANG}"
+          [ "$OCR_VERIFY" = "On" ] && FLAGS="$FLAGS --verify-ocr"
+          [ "$RENAME_BAD" = "On" ] && FLAGS="$FLAGS --rename-bad"
+          [ "$DEBUG_ROI"  = "On" ] && FLAGS="$FLAGS --debug-roi"
+          echo "Running: python scripts/make_manifests.py $FLAGS --ocr-lang \"$OCR_LANG\""
+          python -u scripts/make_manifests.py $FLAGS --ocr-lang "$OCR_LANG"
 
-      - name: Commit manifests (and any renamed files)
+      - name: Commit manifests and any renamed files
+        env:
+          REF_NAME:  ${{ github.ref_name }}
+          OCR_VERIFY: ${{ github.event.inputs.ocr_verify }}
+          RENAME_BAD: ${{ github.event.inputs.rename_bad }}
         run: |
           if [ -n "$(git status --porcelain images docs/manifests)" ]; then
             git config user.name  "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add images docs/manifests
-            git commit -m "manifests: build/verify (OCR=${{ github.event.inputs.ocr_verify }}, rename=${{ github.event.inputs.rename_bad }})" || true
+            git commit -m "manifests: build/verify (OCR=$OCR_VERIFY, rename=$RENAME_BAD)" || true
             for i in 1 2 3; do
-              git fetch origin "${{ github.ref_name }}" || true
-              git pull --rebase origin "${{ github.ref_name }}" || true
-              git push origin HEAD:"${{ github.ref_nam_
+              git fetch origin "$REF_NAME" || true
+              git pull --rebase origin "$REF_NAME" || true
+              git push origin HEAD:"$REF_NAME" && break
+              echo "Push retry $i"; sleep 2
+            done
+          else
+            echo "No changes to commit."
+          fi
