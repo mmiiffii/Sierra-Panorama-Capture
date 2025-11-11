@@ -23,8 +23,6 @@
   .meta{display:flex;justify-content:space-between;gap:10px;color:var(--muted);font-size:13px;margin-top:6px}
   .empty{padding:30px;text-align:center;color:var(--muted)}
   .foot{color:var(--muted);margin-top:8px;font-size:12px}
-  a{color:var(--accent);text-decoration:none}
-  .debug{margin-top:8px;color:#9aa9c3;font-size:12px;white-space:pre-wrap}
 </style>
 </head>
 <body>
@@ -49,26 +47,18 @@
     </div>
 
     <div id="empty" class="empty" style="display:none">No images found yet for this camera.</div>
-    <div class="foot">Filenames: <code>&lt;cam&gt;_YYMMDD_HHMMSS.jpg</code>. Make sure <code>owner/repo/branch</code> below are correct.</div>
-    <div id="debug" class="debug"></div>
+    <div class="foot">Files come from <code>docs/manifests/&lt;cam&gt;.json</code>. Filenames: <code>&lt;cam&gt;_YYMMDD_HHMMSS.jpg</code>.</div>
   </section>
 </div>
 
 <script>
-/*** CONFIG — set these to your repo (case-sensitive) ***/
-const CONFIG = {
-  owner: "YOUR_GITHUB_USERNAME_OR_ORG",
-  repo:  "YOUR_REPO_NAME",
-  branch:"main",
-  cameras: [
-    { id:"borreguiles", name:"Borreguiles", dir:"images/borreguiles" },
-    { id:"stadium",     name:"Stadium",     dir:"images/stadium" },
-    { id:"satelite",    name:"Satelite",    dir:"images/satelite" },
-    { id:"veleta",      name:"Veleta",      dir:"images/veleta" },
-  ],
-  defaultCam: "borreguiles"
-};
-/*** END CONFIG ***/
+const CAMS = [
+  { id:"borreguiles", name:"Borreguiles" },
+  { id:"stadium",     name:"Stadium" },
+  { id:"satelite",    name:"Satelite" },
+  { id:"veleta",      name:"Veleta" },
+];
+const DEFAULT_CAM = "borreguiles";
 
 const elButtons = document.getElementById('camButtons');
 const elHero = document.getElementById('hero');
@@ -78,17 +68,14 @@ const elNext = document.getElementById('next');
 const elMetaName = document.getElementById('metaName');
 const elMetaTime = document.getElementById('metaTime');
 const elEmpty = document.getElementById('empty');
-const elDebug = document.getElementById('debug');
 
-const RAW = (path) => `https://raw.githubusercontent.com/${CONFIG.owner}/${CONFIG.repo}/${CONFIG.branch}/${path}`;
-const API_CONTENTS = (path) => `https://api.github.com/repos/${CONFIG.owner}/${CONFIG.repo}/contents/${encodeURIComponent(path)}?ref=${encodeURIComponent(CONFIG.branch)}`;
-const API_TREE = () => `https://api.github.com/repos/${CONFIG.owner}/${CONFIG.repo}/git/trees/${encodeURIComponent(CONFIG.branch)}?recursive=1`;
+let state = { camId: DEFAULT_CAM, files: [], index: 0 };
 
-let state = { camId: CONFIG.defaultCam, files: [], index: 0 };
-
-function getCam(id){ return CONFIG.cameras.find(c=>c.id===id); }
-
-function parseTs(name, camId){
+function byId(id){ return CAMS.find(c => c.id === id); }
+function setActiveButton(camId){
+  [...elButtons.querySelectorAll('.btn')].forEach(b => b.classList.toggle('active', b.dataset.cam===camId));
+}
+function parseTsFromName(name, camId){
   const rx = new RegExp("^"+camId+"_(\\d{6})_(\\d{6})","i");
   const m = name.match(rx);
   if(!m) return null;
@@ -107,57 +94,19 @@ function fmt(dt){
   return `${dt.getUTCFullYear()}-${p(dt.getUTCMonth()+1)}-${p(dt.getUTCDate())} ${p(dt.getUTCHours())}:${p(dt.getUTCMinutes())}:${p(dt.getUTCSeconds())} UTC`;
 }
 
-async function listViaContents(cam){
-  const url = API_CONTENTS(cam.dir);
-  const res = await fetch(url, { headers: { 'Accept':'application/vnd.github+json' }});
-  if(!res.ok) throw new Error(`contents ${res.status} ${url}`);
-  const data = await res.json();
-  if(!Array.isArray(data)) return [];
-  return data.filter(x=>x.type==="file" && /\.jpe?g$/i.test(x.name))
-             .map(x=>({name:x.name, path:`${cam.dir}/${x.name}`}))
-             .sort((a,b)=>a.name.localeCompare(b.name));
-}
-async function listViaTree(cam){
-  const url = API_TREE();
-  const res = await fetch(url, { headers: { 'Accept':'application/vnd.github+json' }});
-  if(!res.ok) throw new Error(`tree ${res.status} ${url}`);
-  const data = await res.json();
-  const prefix = cam.dir.replace(/\/+$/,'') + '/';
-  const out = (data.tree || [])
-    .filter(node => node.type === "blob" && node.path.startsWith(prefix) && /\.jpe?g$/i.test(node.path))
-    .map(node => ({ name: node.path.split('/').pop(), path: node.path }));
-  out.sort((a,b)=>a.name.localeCompare(b.name));
-  return out;
-}
-async function listImages(cam){
-  elDebug.textContent = "";
-  try {
-    const files = await listViaContents(cam);
-    if(files.length===0) elDebug.textContent = "No files via Contents API (folder empty?).";
-    return files;
-  } catch (e) {
-    elDebug.textContent = "Contents API failed; trying Tree API…\n" + (e?.message || e);
-    try {
-      const files = await listViaTree(cam);
-      if(files.length===0) elDebug.textContent += "\nTree API found no files.";
-      return files;
-    } catch (e2) {
-      elDebug.textContent += "\nTree API failed: " + (e2?.message || e2);
-      return [];
-    }
-  }
-}
-
-function setActiveButton(camId){
-  [...elButtons.querySelectorAll('.btn')].forEach(b=>{
-    b.classList.toggle('active', b.dataset.cam===camId);
-  });
+async function loadManifest(camId){
+  const url = `manifests/${encodeURIComponent(camId)}.json?v=${Date.now()}`;
+  const res = await fetch(url, {cache:'no-store'});
+  if(!res.ok) return [];
+  const arr = await res.json();
+  return Array.isArray(arr) ? arr.sort((a,b)=>a.name.localeCompare(b.name)) : [];
 }
 
 function updateViewer(){
-  const cam = getCam(state.camId);
+  const cam = byId(state.camId);
   elMetaName.textContent = cam ? cam.name : state.camId;
-  if(state.files.length===0){
+
+  if(state.files.length === 0){
     elHero.src = "";
     elSlider.disabled = true;
     elPrev.disabled = elNext.disabled = true;
@@ -166,53 +115,54 @@ function updateViewer(){
     return;
   }
   elEmpty.style.display = "none";
+
   if(state.index < 0) state.index = 0;
-  if(state.index >= state.files.length) state.index = state.files.length-1;
+  if(state.index >= state.files.length) state.index = state.files.length - 1;
+
   const f = state.files[state.index];
-  elHero.src = RAW(f.path);
-  const dt = parseTs(f.name, state.camId);
+  elHero.src = f.path; // manifest already points to repo path (images/<cam>/<file>.jpg) which is served by Pages
+  const dt = parseTsFromName(f.name, state.camId);
   elMetaTime.textContent = fmt(dt);
+
   elSlider.disabled = false;
   elSlider.min = "0";
-  elSlider.max = String(state.files.length-1);
+  elSlider.max = String(state.files.length - 1);
   elSlider.value = String(state.index);
-  elPrev.disabled = (state.index<=0);
-  elNext.disabled = (state.index>=state.files.length-1);
+  elPrev.disabled = (state.index <= 0);
+  elNext.disabled = (state.index >= state.files.length - 1);
 }
 
 async function loadCamera(camId){
   state.camId = camId;
   setActiveButton(camId);
-  const cam = getCam(camId);
-  state.files = await listImages(cam);
-  state.index = Math.max(0, state.files.length-1); // jump to latest
+  state.files = await loadManifest(camId);
+  // If manifest paths are relative (images/...), ensure they resolve under Pages:
+  state.files = state.files.map(f => ({ ...f, path: f.path }));
+  state.index = Math.max(0, state.files.length - 1); // jump to latest
   updateViewer();
 }
 
 function setupUI(){
-  // Buttons
-  elButtons.innerHTML = CONFIG.cameras.map(c=>`<button class="btn" data-cam="${c.id}">${c.name}</button>`).join("");
+  elButtons.innerHTML = CAMS.map(c => `<button class="btn" data-cam="${c.id}">${c.name}</button>`).join("");
   elButtons.addEventListener('click', (e)=>{
     const b = e.target.closest('.btn'); if(!b) return;
     const camId = b.dataset.cam;
     history.replaceState(null,"",`?cam=${encodeURIComponent(camId)}`);
     loadCamera(camId);
   });
-  // Controls
   elPrev.addEventListener('click', ()=>{ state.index--; updateViewer(); });
   elNext.addEventListener('click', ()=>{ state.index++; updateViewer(); });
   elSlider.addEventListener('input', ()=>{ state.index = parseInt(elSlider.value,10)||0; updateViewer(); });
   window.addEventListener('keydown', (e)=>{
-    if(e.key==="ArrowLeft"){ if(state.index>0){ state.index--; updateViewer(); } }
-    if(e.key==="ArrowRight"){ if(state.index<state.files.length-1){ state.index++; updateViewer(); } }
+    if(e.key==="ArrowLeft" && state.index>0){ state.index--; updateViewer(); }
+    if(e.key==="ArrowRight" && state.index<state.files.length-1){ state.index++; updateViewer(); }
   });
 }
 
 (async function init(){
   setupUI();
-  // default from URL ?cam=..., else configured default
   const paramCam = new URLSearchParams(location.search).get('cam');
-  const initial = getCam(paramCam) ? paramCam : CONFIG.defaultCam;
+  const initial = byId(paramCam) ? paramCam : DEFAULT_CAM;
   await loadCamera(initial);
 })();
 </script>
