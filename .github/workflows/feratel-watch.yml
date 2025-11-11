@@ -1,4 +1,4 @@
-name: Feratel – Watch & Trigger
+name: Feratel Watch & Trigger
 
 on:
   workflow_dispatch: {}
