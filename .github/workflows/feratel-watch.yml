@@ -17,10 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
-      SCRIPT_DIR: "scripts"   # <— scripts live here
-      CHECK_INTERVAL: "60"    # seconds between passes
-      REQUIRE_OCR: "0"        # set "1" to require OCR timestamp
-      OCR_LANG: "eng"         # e.g. 'eng+spa' if needed
+      SCRIPT_DIR: "scripts"
+      CHECK_INTERVAL: "60"
+      REQUIRE_OCR: "0"     # set to "1" to skip saves when OCR fails
+      OCR_LANG: "eng"      # add langs if needed, e.g. "eng+spa"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -47,16 +47,27 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Loop: grab once, commit if changed
+      - name: Bootstrap: save current image for each camera, then commit
+        env:
+          REQUIRE_OCR: ${{ env.REQUIRE_OCR }}
+          OCR_LANG: ${{ env.OCR_LANG }}
+        run: |
+          python -u "$SCRIPT_DIR/feratel_cam_watcher.py" --bootstrap
+          if [ -n "$(git status --porcelain images)" ]; then
+            git add images
+            git commit -m "feratel: bootstrap $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+            git push
+          fi
+
+      - name: Watch loop: check for changes and commit on update
         env:
           REQUIRE_OCR: ${{ env.REQUIRE_OCR }}
           OCR_LANG: ${{ env.OCR_LANG }}
           CHECK_INTERVAL: ${{ env.CHECK_INTERVAL }}
-          SCRIPT_DIR: ${{ env.SCRIPT_DIR }}
         run: |
           end=$((SECONDS + 340*60))  # ~5h40m
           while [ $SECONDS -lt $end ]; do
-            python "$SCRIPT_DIR/feratel_cam_watcher.py"  # one pass
+            python -u "$SCRIPT_DIR/feratel_cam_watcher.py"
             if [ -n "$(git status --porcelain images)" ]; then
               git add images
               git commit -m "feratel: new images $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
