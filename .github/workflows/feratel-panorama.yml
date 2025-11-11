@@ -1,4 +1,4 @@
-name: Feratel Panorama Capture
+name: Capture - Panorama Stich
 
 on:
   workflow_dispatch:
