@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Capture Feratel JPG webcams once, using OCR from a fixed bottom-right ROI.
+Capture Sierra Nevada JPG webcams once, using OCR from a fixed bottom-right ROI.
 
 - Reads HH:MM[:SS] from overlay (strict OCR).
 - Date comes from Europe/Madrid on runner time (image often shows time-only).
@@ -43,7 +43,7 @@ CAMS: Dict[str, str] = {
 BASE_DIR = "images"
 TIMEOUT  = 20
 HEADERS  = {
-    "User-Agent": "Mozilla/5.0 (FeratelOCR/1.1)",
+    "User-Agent": "Mozilla/5.0 (SierraNevadaOCR/1.1)",
     "Cache-Control": "no-cache",
     "Pragma": "no-cache",
 }

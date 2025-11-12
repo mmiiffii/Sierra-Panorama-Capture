@@ -1,6 +1,6 @@
-# Feratel Panorama Grabber
+# Sierra Nevada Panorama Grabber
 
-One-stop utility to automatically capture a full sweep of Feratel's **360° panorama** player and stitch the frames into a single large panorama image.
+One-stop utility to automatically capture a full sweep of Sierra Nevada's **360° panorama** player and stitch the frames into a single large panorama image.
 
 ## Quick Start (Local)
 
@@ -20,13 +20,13 @@ HEADLESS=0 python feratel_pano_grabber.py "https://webtv.feratel.com/webtv/?cam=
 ## Docker (Reproducible)
 
 ```bash
-docker build -t feratel-pano .
+docker build -t Sierra Nevada-pano .
 docker run --rm -it -e HEADLESS=1 -v "$PWD/images:/app/images" feratel-pano "https://webtv.feratel.com/webtv/?cam=15111" /app/images 90 2.0
 ```
 
 ## GitHub Actions (images/ output)
 
-This repo includes a workflow `.github/workflows/feratel-panorama.yml`.
+This repo includes a workflow `.github/workflows/Sierra Nevada-panorama.yml`.
 Trigger it from the "Actions" tab and it will place results in an `images/` folder and upload it as an artifact.
 
 ## Arguments

@@ -1,10 +1,10 @@
-name: Feratel Panorama Capture
+name: Sierra Nevada Panorama Capture
 
 on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'Feratel webcam URL'
+        description: 'Sierra Nevada webcam URL'
         required: true
         default: 'https://webtv.feratel.com/webtv/?cam=15111'
       duration:
