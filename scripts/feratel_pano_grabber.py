@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 feratel_pano_grabber.py
-Capture Feratel's 360° panorama and stitch into one wide image.
+Capture Sierra Nevada's 360° panorama and stitch into one wide image.
 
 Usage:
   python feratel_pano_grabber.py [URL] [OUTPUT_DIR] [DURATION_SEC] [FPS]
@@ -58,7 +58,7 @@ from playwright.sync_api import sync_playwright
 DEFAULT_URL = "https://webtv.feratel.com/webtv/?cam=15111"
 
 # ---------------------------- helpers ----------------------------
-def log(*a): print("[feratel-pano]", *a, flush=True)
+def log(*a): print("[Sierra Nevada-pano]", *a, flush=True)
 
 def getenv_bool(n, d):
     v = os.environ.get(n)

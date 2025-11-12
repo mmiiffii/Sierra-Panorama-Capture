@@ -1,10 +1,14 @@
+<<<<<<< HEAD:.github/workflows/feratel-panorama.yml
 name: Capture - Panorama Stich
+=======
+name: Sierra Nevada Panorama Capture
+>>>>>>> rename-sierra:.github/workflows/sierra-nevada-panorama.yml
 
 on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'Feratel webcam URL'
+        description: 'Sierra Nevada webcam URL'
         required: true
         default: 'https://webtv.feratel.com/webtv/?cam=15111'
       duration:
