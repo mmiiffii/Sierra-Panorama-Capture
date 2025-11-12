@@ -1,8 +1,5 @@
-<<<<<<< HEAD:.github/workflows/feratel-ocr-capture.yml
 name: Capture - OCR (5Min)
-=======
-name: Sierra Nevada – OCR Capture
->>>>>>> rename-sierra:.github/workflows/sierra-nevada-ocr-capture.yml
+
 on:
   workflow_dispatch:
   schedule:
