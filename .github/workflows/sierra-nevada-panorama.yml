@@ -3,13 +3,21 @@ name: Capture - Borreguiles Panorama
 on:
   workflow_dispatch:
     inputs:
-      cams:
-        description: "Downloads 360 panorama (borreguiles)"
+      url:
+        description: "WebTV URL (e.g. https://webtv.feratel.com/webtv/?cam=15111)"
+        type: string
+        required: true
+        default: "https://webtv.feratel.com/webtv/?cam=15111"
+      name:
+        description: "Name/prefix for folder and file (e.g. borreguiles)"
         type: string
         required: false
-        default: ""
-  schedule:
-    - cron: "0 * * * *"  # hourly
+        default: "borreguiles"
+      tz:
+        description: "Timezone for filename (IANA, e.g. Europe/Madrid)"
+        type: string
+        required: false
+        default: "Europe/Madrid"
 
 permissions:
   contents: write
@@ -19,7 +27,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  capture:
+  pano:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -38,14 +46,15 @@ jobs:
           pip install playwright
           python -m playwright install --with-deps chromium
 
-      - name: Grab 360° panorama(s)
+      - name: Grab panorama
         env:
-          CAM_TZ: "Europe/Madrid"
-          CAMS: "${{ github.event.inputs.cams }}"
+          WEBTV_URL: ${{ github.event.inputs.url }}
+          NAME:      ${{ github.event.inputs.name }}
+          CAM_TZ:    ${{ github.event.inputs.tz }}
         run: |
           python -u scripts/sierra_nevada_pano_grabber.py
 
-      - name: Commit panoramas (if any)
+      - name: Commit panorama (if any)
         env:
           REF_NAME: ${{ github.ref_name }}
         run: |
