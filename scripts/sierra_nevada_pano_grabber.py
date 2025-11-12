@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-feratel_pano_grabber.py
+sierra_nevada_pano_grabber.py
 Capture Sierra Nevada's 360° panorama and stitch into one wide image.
 
 Usage:
