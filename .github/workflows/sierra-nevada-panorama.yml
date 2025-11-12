@@ -1,8 +1,4 @@
-<<<<<<< HEAD:.github/workflows/feratel-panorama.yml
 name: Capture - Panorama Stich
-=======
-name: Sierra Nevada Panorama Capture
->>>>>>> rename-sierra:.github/workflows/sierra-nevada-panorama.yml
 
 on:
   workflow_dispatch:
