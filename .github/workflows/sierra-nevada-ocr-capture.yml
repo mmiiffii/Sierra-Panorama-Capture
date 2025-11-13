@@ -1,22 +1,23 @@
-name: Capture - OCR (5Min)
+name: Sierra Nevada – OCR Capture (5min)
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *"  # every 5 minutes
+    - cron: "*/5 * * * *"
 
 permissions:
   contents: write
 
 concurrency:
-  group: Sierra Nevada-ocr-capture
+  group: sierra-nevada-ocr-capture
   cancel-in-progress: false
 
 jobs:
   capture:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -30,33 +31,38 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y tesseract-ocr tzdata
+
       - name: Install Python deps
         run: |
           python -m pip install --upgrade pip
           pip install requests numpy opencv-python-headless pytesseract pyyaml
+
       - name: Run OCR capture
         env:
           OCR_LANG: "eng"
           CAM_TZ: "Europe/Madrid"
-          FUTURE_BUF_MIN: "90"     # give yourself 1.5h cushion
-          MORNING_CUTOFF_H: "11"   # before 11:00 repair is allowed
-          DUP_HASH_TOL: "6"        # 5–8 is reasonable
+          FUTURE_BUF_MIN: "90"
+          MORNING_CUTOFF_H: "11"
           DEBUG_ROI: "0"
-          AUTO_REPAIR: "0"         # set "1" if you want automatic rename
+          AUTO_REPAIR: "0"
         run: |
           python -u scripts/sierra_nevada_capture_ocr.py
-      - name: Commit images if changed (safe rebase)
+
+      - name: Commit images + state if changed (safe push)
         run: |
-          if [ -n "$(git status --porcelain images)" ]; then
+          if [ -n "$(git status --porcelain images state)" ]; then
             git config user.name  "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add images
-            git commit -m "Sierra Nevada: OCR capture $(date -u +'%Y-%m-%d %H:%M:%S UTC')" || true
+
+            git add images state
+
+            git commit -m "capture: new Sierra Nevada frames $(date -u +'%Y-%m-%d %H:%M:%S UTC')" || true
+
             for i in 1 2 3; do
-              git fetch origin "${{ github.ref_name }}" || true
-              git pull --rebase origin "${{ github.ref_name }}" || true
-              git push origin HEAD:"${{ github.ref_name }}" && break
-              echo "Push retry $i failed; retrying…" && sleep 3
+              git fetch origin "${GITHUB_REF_NAME}" || true
+              git pull --rebase origin "${GITHUB_REF_NAME}" || true
+              git push origin HEAD:"${GITHUB_REF_NAME}" && break
+              echo "Retry push $i…" && sleep 3
             done
           else
             echo "No new images to commit."
