@@ -38,7 +38,11 @@ jobs:
         env:
           OCR_LANG: "eng"
           CAM_TZ: "Europe/Madrid"
-          DEBUG_ROI: "0"   # set to "1" temporarily to save debug/roi_*.jpg crops
+          FUTURE_BUF_MIN: "90"     # give yourself 1.5h cushion
+          MORNING_CUTOFF_H: "11"   # before 11:00 repair is allowed
+          DUP_HASH_TOL: "6"        # 5–8 is reasonable
+          DEBUG_ROI: "0"
+          AUTO_REPAIR: "0"         # set "1" if you want automatic rename
         run: |
           python -u scripts/sierra_nevada_capture_ocr.py
       - name: Commit images if changed (safe rebase)
