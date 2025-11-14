@@ -1,190 +1,184 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<title>Sierra Nevada Cams</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sierra Nevada — Webcam Archive</title>
+
 <style>
-  :root{--bg:#0b0d12;--panel:#12151c;--text:#e7edf6;--muted:#8fa0b6;--accent:#78b7ff;--card:#151926;--border:#20283a}
-  *{box-sizing:border-box} html,body{height:100%} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,"Helvetica Neue",sans-serif}
-  .wrap{max-width:1200px;margin:0 auto;padding:16px}
-  header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px}
-  h1{margin:0;font-size:18px}
-  .cam-buttons{display:flex;gap:8px;flex-wrap:wrap}
-  .btn{border:1px solid var(--border);background:var(--card);color:var(--text);padding:8px 12px;border-radius:10px;cursor:pointer}
-  .btn.active,.btn:hover{border-color:var(--accent)}
-  .viewer{background:#0e1118;border:1px solid var(--border);border-radius:12px;padding:10px}
-  .hero{position:relative;background:#0a0f18;border-radius:8px;overflow:hidden}
-  .hero img{width:100%;display:block;max-height:70vh;object-fit:contain;background:#0a0f18}
-  .controls{display:flex;gap:8px;align-items:center;margin:10px 0}
-  .ctrl-btn{border:1px solid var(--border);background:var(--panel);color:var(--text);padding:6px 10px;border-radius:8px;cursor:pointer}
-  .ctrl-btn:hover{border-color:var(--accent)}
-  .range{flex:1}
-  .meta{display:flex;justify-content:space-between;gap:10px;color:var(--muted);font-size:13px;margin-top:6px}
-  .empty{padding:30px;text-align:center;color:var(--muted)}
-  .foot{color:var(--muted);margin-top:8px;font-size:12px}
-  .debug{margin-top:8px;color:#9aa9c3;font-size:12px;white-space:pre-wrap}
+  body {
+    margin: 0;
+    font-family: system-ui, sans-serif;
+    background: #111;
+    color: #eee;
+    overflow-x: hidden;
+  }
+  header {
+    padding: 1rem;
+    background: #000;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    border-bottom: 1px solid #333;
+  }
+  select, button {
+    background: #222;
+    color: #eee;
+    border: 1px solid #444;
+    padding: 0.4rem 0.6rem;
+    border-radius: 4px;
+  }
+  #viewer {
+    display: flex;
+    justify-content: center;
+    margin-top: 1rem;
+  }
+  img {
+    max-width: 100vw;
+    max-height: 85vh;
+    border-radius: 6px;
+    transition: opacity 0.15s ease-out;
+  }
+  #timestamp {
+    text-align: center;
+    margin-top: 0.5rem;
+    color: #aaa;
+    font-size: 1rem;
+  }
+  #slider {
+    width: 95%;
+    margin: 1.2rem auto;
+  }
+  #debug {
+    margin: 1rem auto;
+    text-align: center;
+    color: #888;
+  }
 </style>
 </head>
+
 <body>
-<div class="wrap">
-  <header>
-    <h1>Sierra Nevada Cams</h1>
-    <div class="cam-buttons" id="camButtons"></div>
-  </header>
 
-  <section class="viewer">
-    <div class="hero"><img id="hero" alt="camera frame"></div>
+<header>
+  <strong>Sierra Nevada — Archive</strong>
 
-    <div class="controls">
-      <button id="prev" class="ctrl-btn" title="Previous">⟨ Prev</button>
-      <input id="slider" class="range" type="range" min="0" max="0" step="1" value="0" disabled>
-      <button id="next" class="ctrl-btn" title="Next">Next ⟩</button>
-    </div>
+  <label>Camera:</label>
+  <select id="camera"></select>
 
-    <div class="meta">
-      <div id="metaName">—</div>
-      <div id="metaTime">—</div>
-    </div>
+  <label>Day:</label>
+  <select id="day"></select>
+</header>
 
-    <div id="empty" class="empty" style="display:none">No images found yet for this camera.</div>
-    <div class="foot">
-      Pulling images via <code>raw.githubusercontent.com</code>. Repo must be <strong>public</strong>.
-    </div>
-    <div id="debug" class="debug"></div>
-  </section>
+<div id="viewer">
+  <img id="frame" src="" alt="webcam frame">
 </div>
 
+<div id="timestamp"></div>
+
+<input id="slider" type="range" min="0" max="0" value="0" />
+
+<div id="debug"></div>
+
 <script>
-/*** CONFIG — set these to your repo (case-sensitive) ***/
-const CONFIG = {
-  owner: "mmiiffii",
-  repo:  "Sierra-Panorama-Capture",
-  branch:"main"
+/* ---------------------------
+   CONFIG
+---------------------------- */
+const CAMERAS = {
+  borreguiles: { name: "Borreguiles" },
+  stadium: { name: "Stadium" },
+  satellite: { name: "Satelite" },
+  veleta: { name: "Veleta" }
 };
-const RAW = (p) => `https://raw.githubusercontent.com/${CONFIG.owner}/${CONFIG.repo}/${CONFIG.branch}/${p}`;
-/*** END CONFIG ***/
 
-const CAMS = [
-  { id:"borreguiles", name:"Borreguiles" },
-  { id:"stadium",     name:"Stadium" },
-  { id:"satelite",    name:"Satelite" },
-  { id:"veleta",      name:"Veleta" },
-];
-const DEFAULT_CAM = "borreguiles";
+const cameraSel = document.querySelector("#camera");
+const daySel    = document.querySelector("#day");
+const slider    = document.querySelector("#slider");
+const img       = document.querySelector("#frame");
+const ts        = document.querySelector("#timestamp");
 
-const elButtons = document.getElementById('camButtons');
-const elHero = document.getElementById('hero');
-const elSlider = document.getElementById('slider');
-const elPrev = document.getElementById('prev');
-const elNext = document.getElementById('next');
-const elMetaName = document.getElementById('metaName');
-const elMetaTime = document.getElementById('metaTime');
-const elEmpty = document.getElementById('empty');
-const elDebug = document.getElementById('debug');
+/* Populate camera dropdown */
+Object.entries(CAMERAS).forEach(([key, cfg]) => {
+  const opt = document.createElement("option");
+  opt.value = key;
+  opt.textContent = cfg.name;
+  cameraSel.appendChild(opt);
+});
 
-let state = { camId: DEFAULT_CAM, files: [], index: 0 };
+let manifest = null;
 
-function byId(id){ return CAMS.find(c => c.id === id); }
-function setActiveButton(camId){
-  [...elButtons.querySelectorAll('.btn')].forEach(b => b.classList.toggle('active', b.dataset.cam===camId));
-}
-function parseTsFromName(name, camId){
-  const rx = new RegExp("^"+camId+"_(\\d{6})_(\\d{6})","i");
-  const m = name.match(rx); if(!m) return null;
-  const d=m[1], t=m[2];
-  const y = 2000 + parseInt(d.slice(0,2),10);
-  const mo= parseInt(d.slice(2,4),10)-1;
-  const da= parseInt(d.slice(4,6),10);
-  const hh= parseInt(t.slice(0,2),10);
-  const mi= parseInt(t.slice(2,4),10);
-  const ss= parseInt(t.slice(4,6),10);
-  return new Date(Date.UTC(y,mo,da,hh,mi,ss));
-}
-function fmt(dt){
-  if(!dt) return "—";
-  const p=n=>String(n).padStart(2,"0");
-  return `${dt.getUTCFullYear()}-${p(dt.getUTCMonth()+1)}-${p(dt.getUTCDate())} ${p(dt.getUTCHours())}:${p(dt.getUTCMinutes())}:${p(dt.getUTCSeconds())} UTC`;
-}
-
-async function loadManifest(camId){
-  // manifests live under docs/, so on Pages they’re at /manifests/<cam>.json
-  const url = `manifests/${encodeURIComponent(camId)}.json?v=${Date.now()}`;
+/* ---- Fetch list of days ---- */
+async function loadDays(camera) {
+  daySel.innerHTML = "";
   try {
-    const res = await fetch(url, {cache:'no-store'});
-    if(!res.ok) throw new Error(`HTTP ${res.status}`);
-    const arr = await res.json();
-    if (!Array.isArray(arr)) return [];
-    // sort chronologically by name
-    return arr.sort((a,b)=>a.name.localeCompare(b.name));
-  } catch (e) {
-    elDebug.textContent = `Manifest load failed: ${url}\n${e}`;
-    return [];
+    const r = await fetch(`docs/${camera}/index.json`);
+    const days = await r.json();
+    days.reverse().forEach(d => {
+      const opt = document.createElement("option");
+      opt.value = d;
+      opt.textContent = d;
+      daySel.appendChild(opt);
+    });
+  } catch (err) {
+    console.error(err);
   }
 }
 
-function updateViewer(){
-  const cam = byId(state.camId);
-  elMetaName.textContent = cam ? cam.name : state.camId;
+/* ---- Fetch manifest for selected day ---- */
+async function loadManifest() {
+  const camera = cameraSel.value;
+  const day = daySel.value;
+  const url = `docs/${camera}/${day}.json`;
 
-  if(state.files.length === 0){
-    elHero.src = "";
-    elSlider.disabled = true;
-    elPrev.disabled = elNext.disabled = true;
-    elMetaTime.textContent = "—";
-    elEmpty.style.display = "";
-    return;
-  }
-  elEmpty.style.display = "none";
+  const r = await fetch(url);
+  manifest = await r.json();
 
-  if(state.index < 0) state.index = 0;
-  if(state.index >= state.files.length) state.index = state.files.length - 1;
-
-  const f = state.files[state.index];
-  // IMPORTANT: use RAW URL for the actual image
-  elHero.src = RAW(f.path) + "?v=" + Date.now(); // cache-bust to avoid stale frames
-  const dt = parseTsFromName(f.name, state.camId);
-  elMetaTime.textContent = fmt(dt);
-
-  elSlider.disabled = false;
-  elSlider.min = "0";
-  elSlider.max = String(state.files.length - 1);
-  elSlider.value = String(state.index);
-  elPrev.disabled = (state.index <= 0);
-  elNext.disabled = (state.index >= state.files.length - 1);
+  slider.max = manifest.frames.length - 1;
+  slider.value = manifest.frames.length - 1;
+  showFrame();
 }
 
-async function loadCamera(camId){
-  state.camId = camId;
-  setActiveButton(camId);
-  state.files = await loadManifest(camId);
-  state.index = Math.max(0, state.files.length - 1); // jump to latest
-  updateViewer();
+/* ---- Display frame ---- */
+function showFrame() {
+  if (!manifest) return;
+  const idx = Number(slider.value);
+  const file = manifest.frames[idx].file;
+  const time = manifest.frames[idx].time;
+
+  img.style.opacity = 0;
+  img.onload = () => (img.style.opacity = 1);
+  img.src = `../images/${manifest.camera}/${manifest.day}/${file}`;
+  ts.textContent = time;
+
+  /* Preload neighbours */
+  preload(idx - 1);
+  preload(idx + 1);
 }
 
-function setupUI(){
-  elButtons.innerHTML = CAMS.map(c => `<button class="btn" data-cam="${c.id}">${c.name}</button>`).join("");
-  elButtons.addEventListener('click', (e)=>{
-    const b = e.target.closest('.btn'); if(!b) return;
-    const camId = b.dataset.cam;
-    history.replaceState(null,"",`?cam=${encodeURIComponent(camId)}`);
-    loadCamera(camId);
-  });
-  elPrev.addEventListener('click', ()=>{ state.index--; updateViewer(); });
-  elNext.addEventListener('click', ()=>{ state.index++; updateViewer(); });
-  elSlider.addEventListener('input', ()=>{ state.index = parseInt(elSlider.value,10)||0; updateViewer(); });
-  window.addEventListener('keydown', (e)=>{
-    if(e.key==="ArrowLeft" && state.index>0){ state.index--; updateViewer(); }
-    if(e.key==="ArrowRight" && state.index<state.files.length-1){ state.index++; updateViewer(); }
-  });
+function preload(i) {
+  if (i < 0 || i >= manifest.frames.length) return;
+  const file = manifest.frames[i].file;
+  const p = new Image();
+  p.src = `../images/${manifest.camera}/${manifest.day}/${file}`;
 }
 
-(async function init(){
-  setupUI();
-  const paramCam = new URLSearchParams(location.search).get('cam');
-  const initial = byId(paramCam) ? paramCam : DEFAULT_CAM;
-  await loadCamera(initial);
+/* ---- Init ---- */
+cameraSel.onchange = async () => {
+  await loadDays(cameraSel.value);
+  await loadManifest();
+};
+
+daySel.onchange = loadManifest;
+slider.oninput = showFrame;
+
+(async () => {
+  await loadDays("borreguiles");
+  cameraSel.value = "borreguiles";
+  await loadManifest();
 })();
 </script>
+
 </body>
 </html>
