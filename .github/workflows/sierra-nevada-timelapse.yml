@@ -1,4 +1,4 @@
-name: Timelapse - one of 4 Cams
+name:  Create Timelapse - one of 4 Cams
 
 on:
   workflow_dispatch:
@@ -17,7 +17,7 @@ on:
         description: "How many days back (>= 1)"
         required: true
         type: number
-        default: 3
+        default: 1
       fps:
         description: "Frames per second"
         required: true
@@ -48,50 +48,72 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # if you prefer, you can switch to: pip install -r requirements.txt
+          # Or: pip install -r requirements.txt
           pip install numpy opencv-python-headless
 
       - name: Ensure output dir
         run: mkdir -p timelapses
 
       - name: Build timelapse
-        id: build
         env:
           CAMERA: ${{ github.event.inputs.camera }}
           DAYS: ${{ github.event.inputs.days_back }}
           FPS_IN: ${{ github.event.inputs.fps }}
           MAX_W: ${{ github.event.inputs.max_width }}
           RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           echo "Camera folder : ${CAMERA}"
           echo "Days back     : ${DAYS}"
           echo "FPS           : ${FPS_IN}"
           echo "Max width     : ${MAX_W}"
 
-          OUT="timelapses/timelapse_${CAMERA}_last${DAYS}d_run${RUN_ID}.mp4"
-          echo "Output path   : ${OUT}"
+          OUT_MP4="timelapses/timelapse_${CAMERA}_last${DAYS}d_run${RUN_ID}.mp4"
+          OUT_TXT="timelapses/timelapse_${CAMERA}_last${DAYS}d_run${RUN_ID}.txt"
+
+          echo "Output video  : ${OUT_MP4}"
+          echo "Info file     : ${OUT_TXT}"
 
           python -u scripts/create_timelapse.py \
             --camera "${CAMERA}" \
             --days "${DAYS}" \
             --fps "${FPS_IN}" \
             --max-width "${MAX_W}" \
-            --output "${OUT}"
+            --stabilize \
+            --fade-gaps \
+            --output "${OUT_MP4}"
 
-          if [ ! -f "${OUT}" ]; then
-            echo "ERROR: expected output video not found: ${OUT}"
+          if [ ! -f "${OUT_MP4}" ]; then
+            echo "ERROR: expected output video not found: ${OUT_MP4}"
             echo "Listing timelapses/ directory:"
             ls -l timelapses || echo "no timelapses dir?"
             exit 1
           fi
 
-          echo "video_path=${OUT}" >> "$GITHUB_OUTPUT"
+          echo "Timelapse created at: ${OUT_MP4}"
+          ls -l "${OUT_MP4}"
 
-      - name: Upload timelapse artifact
+          # Write a small info file with a link back to this run
+          {
+            echo "camera=${CAMERA}"
+            echo "days_back=${DAYS}"
+            echo "fps=${FPS_IN}"
+            echo "max_width=${MAX_W}"
+            echo "run_id=${RUN_ID}"
+            echo "run_url=${GITHUB_RUN_URL}"
+            echo "artifact_name=timelapse-${CAMERA}-last${DAYS}d"
+          } > "${OUT_TXT}"
+
+          echo "Info file contents:"
+          cat "${OUT_TXT}"
+
+      - name: Upload timelapse artifact (video + link file)
         uses: actions/upload-artifact@v4
         with:
           name: timelapse-${{ github.event.inputs.camera }}-last${{ github.event.inputs.days_back }}d
-          path: ${{ steps.build.outputs.video_path }}
+          path: >
+            timelapses/timelapse_${{ github.event.inputs.camera }}_last${{ github.event.inputs.days_back }}d_run${{ github.run_id }}.mp4
+            timelapses/timelapse_${{ github.event.inputs.camera }}_last${{ github.event.inputs.days_back }}d_run${{ github.run_id }}.txt
           if-no-files-found: error
 
       - name: Job summary
@@ -103,3 +125,4 @@ jobs:
           echo "- FPS           : \`${{ github.event.inputs.fps }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Max width     : \`${{ github.event.inputs.max_width }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Artifact name : \`timelapse-${{ github.event.inputs.camera }}-last${{ github.event.inputs.days_back }}d\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Run URL       : \`${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\`" >> "$GITHUB_STEP_SUMMARY"
