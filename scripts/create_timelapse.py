@@ -8,6 +8,7 @@ Create a timelapse for a single Sierra Nevada camera.
     * unreadable JPG
     * resolution mismatch
     * exact byte duplicate (same SHA-1 as previous)
+- Optionally downscale to a max width (e.g. 1920).
 - Write an MP4 file (mp4v via OpenCV).
 
 Usage:
@@ -16,9 +17,10 @@ Usage:
         --camera borreguiles \
         --days 2 \
         --fps 24 \
+        --max-width 1920 \
         --output timelapse_borreguiles.mp4
 
-IMPORTANT: --camera must match the folder under images/, e.g.
+IMPORTANT: --camera must match the folder under images/:
     images/borreguiles
     images/satelite
     images/stadium
@@ -46,7 +48,7 @@ except Exception:
 ROOT = Path(__file__).resolve().parents[1]
 IMAGES_ROOT = ROOT / "images"
 
-# Match ..._YYMMDD_HHMMSS or ..._YYYYMMDD_HHMMSS
+# Match ..._YYMMDD_HHMMSS or ..._YYYYMMDD_HHMMSS anywhere in the filename
 TS_RE = re.compile(r"(?P<date>\d{6}|\d{8})_(?P<time>\d{6})")
 
 
@@ -67,6 +69,12 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--days", type=int, default=1, help="How many days back to include (>=1)")
     p.add_argument("--fps", type=float, default=24.0, help="Frames per second in the output video")
+    p.add_argument(
+        "--max-width",
+        type=int,
+        default=0,
+        help="Optional max video width in pixels (0 = use native size)",
+    )
     p.add_argument("--output", required=True, help="Output MP4 file path")
     return p.parse_args()
 
@@ -161,7 +169,26 @@ def read_image(path: Path) -> Optional[np.ndarray]:
     return img
 
 
-def build_timelapse(frames: List[FrameInfo], fps: float, out_path: Path) -> bool:
+def decide_output_size(
+    base_size: Tuple[int, int],
+    max_width: int,
+) -> Tuple[int, int, float]:
+    """Return (out_w, out_h, scale_factor) given base size and max_width."""
+    base_w, base_h = base_size
+    if max_width <= 0 or base_w <= max_width:
+        return base_w, base_h, 1.0
+    scale = max_width / float(base_w)
+    out_w = int(round(base_w * scale))
+    out_h = int(round(base_h * scale))
+    return out_w, out_h, scale
+
+
+def build_timelapse(
+    frames: List[FrameInfo],
+    fps: float,
+    out_path: Path,
+    max_width: int,
+) -> bool:
     if not frames:
         print("[timelapse] No frames to build video.", file=sys.stderr)
         return False
@@ -170,6 +197,7 @@ def build_timelapse(frames: List[FrameInfo], fps: float, out_path: Path) -> bool
     prev_sha = None
     base_size: Optional[Tuple[int, int]] = None
 
+    # First pass: load images, enforce consistent size, de-dup, keep in memory
     for fi in frames:
         sha = sha1_for_file(fi.path)
         if sha is None:
@@ -202,11 +230,22 @@ def build_timelapse(frames: List[FrameInfo], fps: float, out_path: Path) -> bool
         print("[timelapse] All frames were skipped (duplicates or glitches).", file=sys.stderr)
         return False
 
-    width, height = base_size
+    assert base_size is not None
+    out_w, out_h, scale = decide_output_size(base_size, max_width)
+
+    if scale != 1.0:
+        print(
+            f"[timelapse] downscaling from {base_size[0]}x{base_size[1]} "
+            f"to {out_w}x{out_h} (scale={scale:.3f})",
+            file=sys.stderr,
+        )
+    else:
+        print(f"[timelapse] using native size {out_w}x{out_h}", file=sys.stderr)
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(str(out_path), fourcc, fps, (width, height))
+    writer = cv2.VideoWriter(str(out_path), fourcc, fps, (out_w, out_h))
 
     if not writer.isOpened():
         print("[timelapse] ERROR: could not open VideoWriter", file=sys.stderr)
@@ -214,6 +253,8 @@ def build_timelapse(frames: List[FrameInfo], fps: float, out_path: Path) -> bool
 
     print(f"[timelapse] writing video {out_path} ({len(kept)} frames @ {fps} fps)")
     for fi, img in kept:
+        if scale != 1.0:
+            img = cv2.resize(img, (out_w, out_h), interpolation=cv2.INTER_AREA)
         writer.write(img)
 
     writer.release()
@@ -226,10 +267,13 @@ def main() -> int:
 
     cam_folder = args.camera.strip()
     frames = iter_frames_for_camera(cam_folder, args.days)
-    print(f"[timelapse] found {len(frames)} candidate frames for folder '{cam_folder}' over last {args.days} days")
+    print(
+        f"[timelapse] found {len(frames)} candidate frames for folder "
+        f"'{cam_folder}' over last {args.days} days"
+    )
 
     out_path = Path(args.output)
-    ok = build_timelapse(frames, args.fps, out_path)
+    ok = build_timelapse(frames, args.fps, out_path, args.max_width)
     if not ok:
         return 1
 
