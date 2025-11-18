@@ -2,13 +2,16 @@
 """
 Create a timelapse for a single Sierra Nevada camera.
 
+Features:
 - Select frames for the last N days (based on date in filename).
 - Sort chronologically.
 - Skip "glitched" frames:
     * unreadable JPG
     * resolution mismatch
-    * exact byte duplicate (same SHA-1 as previous)
-- Optionally downscale to a max width (e.g. 1920).
+    * exact byte duplicate (same SHA-1 as previous).
+- Optional downscale to a max width (e.g. 1920).
+- Optional simple stabilisation (translation-only).
+- Optional crossfade over large time gaps (e.g. night → morning).
 - Write an MP4 file (mp4v via OpenCV).
 
 Usage:
@@ -18,7 +21,9 @@ Usage:
         --days 2 \
         --fps 24 \
         --max-width 1920 \
-        --output timelapse_borreguiles.mp4
+        --stabilize \
+        --fade-gaps \
+        --output timelapses/timelapse_borreguiles.mp4
 
 IMPORTANT: --camera must match the folder under images/:
     images/borreguiles
@@ -74,6 +79,16 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=0,
         help="Optional max video width in pixels (0 = use native size)",
+    )
+    p.add_argument(
+        "--stabilize",
+        action="store_true",
+        help="Enable simple translation-based stabilisation",
+    )
+    p.add_argument(
+        "--fade-gaps",
+        action="store_true",
+        help="Crossfade over big time gaps between frames (e.g. night → morning)",
     )
     p.add_argument("--output", required=True, help="Output MP4 file path")
     return p.parse_args()
@@ -183,11 +198,37 @@ def decide_output_size(
     return out_w, out_h, scale
 
 
+def basic_stabilize(prev_frame: np.ndarray, curr_frame: np.ndarray) -> np.ndarray:
+    """
+    Very simple translation-only stabilisation using phase correlation.
+    Returns a stabilised version of curr_frame.
+    """
+    prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    curr_gray = cv2.cvtColor(curr_frame, cv2.COLOR_BGR2GRAY).astype(np.float32)
+
+    shift, _ = cv2.phaseCorrelate(prev_gray, curr_gray)
+    dx, dy = shift  # (x, y)
+
+    M = np.float32([[1, 0, dx], [0, 1, dy]])
+    stabilised = cv2.warpAffine(
+        curr_frame,
+        M,
+        (curr_frame.shape[1], curr_frame.shape[0]),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_REFLECT,
+    )
+    return stabilised
+
+
 def build_timelapse(
     frames: List[FrameInfo],
     fps: float,
     out_path: Path,
     max_width: int,
+    stabilize: bool,
+    fade_gaps: bool,
+    gap_hours_threshold: float = 8.0,
+    gap_fade_frames: int = 10,
 ) -> bool:
     if not frames:
         print("[timelapse] No frames to build video.", file=sys.stderr)
@@ -251,11 +292,51 @@ def build_timelapse(
         print("[timelapse] ERROR: could not open VideoWriter", file=sys.stderr)
         return False
 
-    print(f"[timelapse] writing video {out_path} ({len(kept)} frames @ {fps} fps)")
-    for fi, img in kept:
+    print(f"[timelapse] writing video {out_path} ({len(kept)} base frames @ {fps} fps)")
+
+    prev_frame_for_stab: Optional[np.ndarray] = None
+    prev_frame_written: Optional[np.ndarray] = None
+    prev_dt: Optional[datetime] = None
+
+    for idx, (fi, img) in enumerate(kept):
+        # Resize if needed
         if scale != 1.0:
-            img = cv2.resize(img, (out_w, out_h), interpolation=cv2.INTER_AREA)
-        writer.write(img)
+            frame = cv2.resize(img, (out_w, out_h), interpolation=cv2.INTER_AREA)
+        else:
+            frame = img
+
+        # Stabilise relative to previous written frame
+        if stabilize and prev_frame_for_stab is not None:
+            try:
+                frame = basic_stabilize(prev_frame_for_stab, frame)
+            except Exception as e:
+                print(f"[timelapse] WARN: stabilisation failed on {fi.path.name}: {e}", file=sys.stderr)
+
+        # Gap fading
+        if (
+            fade_gaps
+            and prev_frame_written is not None
+            and prev_dt is not None
+        ):
+            gap_hours = (fi.dt - prev_dt).total_seconds() / 3600.0
+            if gap_hours >= gap_hours_threshold:
+                print(
+                    f"[timelapse] gap {gap_hours:.1f}h between "
+                    f"{prev_dt} and {fi.dt} → inserting {gap_fade_frames} fade frames",
+                    file=sys.stderr,
+                )
+                for k in range(1, gap_fade_frames + 1):
+                    alpha = k / float(gap_fade_frames + 1)
+                    blend = cv2.addWeighted(prev_frame_written, 1.0 - alpha, frame, alpha, 0.0)
+                    writer.write(blend)
+
+        # Write current frame
+        writer.write(frame)
+
+        # Update reference frames
+        prev_frame_for_stab = frame.copy()
+        prev_frame_written = frame
+        prev_dt = fi.dt
 
     writer.release()
     print("[timelapse] done.")
@@ -273,7 +354,14 @@ def main() -> int:
     )
 
     out_path = Path(args.output)
-    ok = build_timelapse(frames, args.fps, out_path, args.max_width)
+    ok = build_timelapse(
+        frames,
+        args.fps,
+        out_path,
+        args.max_width,
+        args.stabilize,
+        args.fade_gaps,
+    )
     if not ok:
         return 1
 
