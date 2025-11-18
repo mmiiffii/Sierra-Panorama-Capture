@@ -44,7 +44,7 @@ IMAGES_ROOT = ROOT / "images"
 CAM_FOLDERS = {
     "borreguiles": "Borreguiles",
     "stadium": "Stadium",
-    "stadiumsatelite": "StadiumSatelite",
+    "satelite": "Satelite",
     "veleta": "Veleta",
 }
 
