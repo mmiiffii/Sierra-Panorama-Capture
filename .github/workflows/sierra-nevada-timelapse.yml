@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       camera:
-        description: "Camera"
+        description: "Camera (matches folder under images/)"
         required: true
         type: choice
         options:
@@ -14,7 +14,7 @@ on:
           - veleta
         default: borreguiles
       days_back:
-        description: "How many days back (integer >= 1)"
+        description: "How many days back (>= 1)"
         required: true
         type: number
         default: 1
@@ -63,9 +63,9 @@ jobs:
           FPS: ${{ github.event.inputs.fps }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          echo "Camera key: ${CAMERA}"
-          echo "Days back: ${DAYS}"
-          echo "FPS:       ${FPS}"
+          echo "Camera (folder): ${CAMERA}"
+          echo "Days back:       ${DAYS}"
+          echo "FPS:             ${FPS}"
 
           OUT="timelapse_${CAMERA}_run${RUN_ID}.mp4"
           echo "Output will be: ${OUT}"
@@ -92,7 +92,7 @@ jobs:
           tag_name: timelapse-${{ github.event.inputs.camera }}-run-${{ github.run_id }}
           release_name: Timelapse - ${{ github.event.inputs.camera }} (run ${{ github.run_number }})
           body: |
-            Timelapse for camera: ${{ github.event.inputs.camera }}
+            Timelapse for camera folder: ${{ github.event.inputs.camera }}
             Days back: ${{ github.event.inputs.days_back }}
             FPS: ${{ github.event.inputs.fps }}
 
