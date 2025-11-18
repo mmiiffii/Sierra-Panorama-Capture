@@ -1,4 +1,4 @@
-name: Capture - All Cams (x4 - 5min)
+name: Capture - All Cams (x4) 5min
 
 on:
   workflow_dispatch:
