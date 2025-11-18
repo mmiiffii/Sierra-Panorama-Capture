@@ -17,7 +17,7 @@ on:
         description: "How many days back (>= 1)"
         required: true
         type: number
-        default: 1
+        default: 3
       fps:
         description: "Frames per second"
         required: true
