@@ -1,18 +1,18 @@
-name:  Timelapse - Choose Camera
+name: Timelapse - Sierra Nevada
 
 on:
   workflow_dispatch:
     inputs:
       camera:
-        description: "Camera"
+        description: "Camera (boreguilles, satelite, stadium, veleta)"
         required: true
         type: choice
         options:
-          - Borreguiles
-          - Stadium
-          - Satelite
-          - Veleta
-        default: Borreguiles
+          - boreguilles
+          - satelite
+          - stadium
+          - veleta
+        default: boreguilles
       days_back:
         description: "How many days back"
         required: true
@@ -108,7 +108,7 @@ EOF
           fi
 
           NAME="$(basename "${VIDEO_PATH}")"
-          echo "Uploading ${VIDEO_PATH} to release…"
+          echo "Uploading ${VIDEO_PATH} to release..."
 
           curl -sSL \
             -X POST \
