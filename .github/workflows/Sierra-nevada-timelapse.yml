@@ -1,4 +1,4 @@
-name: Timelapse - Sierra Nevada
+name: Sierra Nevada Timelapse
 
 on:
   workflow_dispatch:
