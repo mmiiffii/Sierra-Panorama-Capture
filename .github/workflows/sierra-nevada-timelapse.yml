@@ -1,4 +1,4 @@
-name: Timelapse - one of 4 Cams
+name: Create Timelapse - one of 4 Cams
 
 on:
   workflow_dispatch:
