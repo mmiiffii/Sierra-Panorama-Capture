@@ -8,15 +8,21 @@ Create a timelapse for a single Sierra Nevada camera.
     * unreadable JPG
     * resolution mismatch
     * exact byte duplicate (same SHA-1 as previous)
-- Write an MP4 file (H.264-ish via OpenCV's mp4v).
+- Write an MP4 file (mp4v via OpenCV).
 
-Usage (GitHub Actions will call this):
+Usage:
 
     python scripts/create_timelapse.py \
-        --camera Borreguiles \
+        --camera borreguiles \
         --days 2 \
         --fps 24 \
-        --output timelapse_Borreguiles.mp4
+        --output timelapse_borreguiles.mp4
+
+IMPORTANT: --camera must match the folder under images/, e.g.
+    images/borreguiles
+    images/satelite
+    images/stadium
+    images/veleta
 """
 
 import argparse
@@ -40,14 +46,6 @@ except Exception:
 ROOT = Path(__file__).resolve().parents[1]
 IMAGES_ROOT = ROOT / "images"
 
-# Folder names as they exist in repo
-CAM_FOLDERS = {
-    "borreguiles": "Borreguiles",
-    "stadium": "Stadium",
-    "satelite": "Satelite",
-    "veleta": "Veleta",
-}
-
 # Match ..._YYMMDD_HHMMSS or ..._YYYYMMDD_HHMMSS
 TS_RE = re.compile(r"(?P<date>\d{6}|\d{8})_(?P<time>\d{6})")
 
@@ -61,7 +59,12 @@ class FrameInfo:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Create Sierra Nevada timelapse")
-    p.add_argument("--camera", required=True, help="Camera name (e.g. Borreguiles, Stadium, StadiumSatelite, Veleta)")
+    p.add_argument(
+        "--camera",
+        required=True,
+        help="Camera folder name under images/ "
+             "(borreguiles, satelite, stadium, veleta)",
+    )
     p.add_argument("--days", type=int, default=1, help="How many days back to include (>=1)")
     p.add_argument("--fps", type=float, default=24.0, help="Frames per second in the output video")
     p.add_argument("--output", required=True, help="Output MP4 file path")
@@ -112,6 +115,9 @@ def parse_timestamp_from_name(name: str) -> Optional[datetime]:
 
 def iter_frames_for_camera(cam_folder: str, days: int) -> List[FrameInfo]:
     cam_dir = IMAGES_ROOT / cam_folder
+    print(f"[timelapse] IMAGES_ROOT = {IMAGES_ROOT}", file=sys.stderr)
+    print(f"[timelapse] cam_dir     = {cam_dir}", file=sys.stderr)
+
     if not cam_dir.exists():
         print(f"[timelapse] ERROR: camera folder not found: {cam_dir}", file=sys.stderr)
         return []
@@ -183,7 +189,10 @@ def build_timelapse(frames: List[FrameInfo], fps: float, out_path: Path) -> bool
             base_size = (w, h)
         else:
             if (w, h) != base_size:
-                print(f"[timelapse] skip glitched (size change) {fi.path.name} ({w}x{h} != {base_size[0]}x{base_size[1]})")
+                print(
+                    f"[timelapse] skip glitched (size change) {fi.path.name} "
+                    f"({w}x{h} != {base_size[0]}x{base_size[1]})"
+                )
                 continue
 
         kept.append((fi, img))
@@ -196,7 +205,6 @@ def build_timelapse(frames: List[FrameInfo], fps: float, out_path: Path) -> bool
     width, height = base_size
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # FourCC for mp4 (not perfect H.264, but works on GitHub runners & browsers)
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = cv2.VideoWriter(str(out_path), fourcc, fps, (width, height))
 
@@ -216,16 +224,9 @@ def build_timelapse(frames: List[FrameInfo], fps: float, out_path: Path) -> bool
 def main() -> int:
     args = parse_args()
 
-    cam_key = args.camera.strip().lower()
-    if cam_key not in CAM_FOLDERS:
-        print(f"[timelapse] ERROR: unknown camera '{args.camera}'. Expected one of: {', '.join(CAM_FOLDERS.keys())}",
-              file=sys.stderr)
-        return 1
-
-    cam_folder = CAM_FOLDERS[cam_key]
-
+    cam_folder = args.camera.strip()
     frames = iter_frames_for_camera(cam_folder, args.days)
-    print(f"[timelapse] found {len(frames)} candidate frames for camera {args.camera} over last {args.days} days")
+    print(f"[timelapse] found {len(frames)} candidate frames for folder '{cam_folder}' over last {args.days} days")
 
     out_path = Path(args.output)
     ok = build_timelapse(frames, args.fps, out_path)
