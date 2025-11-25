@@ -10,7 +10,6 @@ Features:
     * resolution mismatch
     * exact byte duplicate (same SHA-1 as previous).
 - Optional downscale to a max width (e.g. 1920).
-- Optional simple stabilisation (translation-only).
 - Optional crossfade over large time gaps (e.g. night → morning).
 - Write an MP4 file (mp4v via OpenCV).
 
@@ -21,7 +20,6 @@ Usage:
         --days 2 \
         --fps 24 \
         --max-width 1920 \
-        --stabilize \
         --fade-gaps \
         --output timelapses/timelapse_borreguiles.mp4
 
@@ -79,11 +77,6 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=0,
         help="Optional max video width in pixels (0 = use native size)",
-    )
-    p.add_argument(
-        "--stabilize",
-        action="store_true",
-        help="Enable simple translation-based stabilisation",
     )
     p.add_argument(
         "--fade-gaps",
@@ -198,34 +191,11 @@ def decide_output_size(
     return out_w, out_h, scale
 
 
-def basic_stabilize(prev_frame: np.ndarray, curr_frame: np.ndarray) -> np.ndarray:
-    """
-    Very simple translation-only stabilisation using phase correlation.
-    Returns a stabilised version of curr_frame.
-    """
-    prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY).astype(np.float32)
-    curr_gray = cv2.cvtColor(curr_frame, cv2.COLOR_BGR2GRAY).astype(np.float32)
-
-    shift, _ = cv2.phaseCorrelate(prev_gray, curr_gray)
-    dx, dy = shift  # (x, y)
-
-    M = np.float32([[1, 0, dx], [0, 1, dy]])
-    stabilised = cv2.warpAffine(
-        curr_frame,
-        M,
-        (curr_frame.shape[1], curr_frame.shape[0]),
-        flags=cv2.INTER_LINEAR,
-        borderMode=cv2.BORDER_REFLECT,
-    )
-    return stabilised
-
-
 def build_timelapse(
     frames: List[FrameInfo],
     fps: float,
     out_path: Path,
     max_width: int,
-    stabilize: bool,
     fade_gaps: bool,
     gap_hours_threshold: float = 8.0,
     gap_fade_frames: int = 10,
@@ -294,7 +264,6 @@ def build_timelapse(
 
     print(f"[timelapse] writing video {out_path} ({len(kept)} base frames @ {fps} fps)")
 
-    prev_frame_for_stab: Optional[np.ndarray] = None
     prev_frame_written: Optional[np.ndarray] = None
     prev_dt: Optional[datetime] = None
 
@@ -305,14 +274,7 @@ def build_timelapse(
         else:
             frame = img
 
-        # Stabilise relative to previous written frame
-        if stabilize and prev_frame_for_stab is not None:
-            try:
-                frame = basic_stabilize(prev_frame_for_stab, frame)
-            except Exception as e:
-                print(f"[timelapse] WARN: stabilisation failed on {fi.path.name}: {e}", file=sys.stderr)
-
-        # Gap fading
+        # Gap fading (night → morning, etc.)
         if (
             fade_gaps
             and prev_frame_written is not None
@@ -333,8 +295,6 @@ def build_timelapse(
         # Write current frame
         writer.write(frame)
 
-        # Update reference frames
-        prev_frame_for_stab = frame.copy()
         prev_frame_written = frame
         prev_dt = fi.dt
 
@@ -359,7 +319,6 @@ def main() -> int:
         args.fps,
         out_path,
         args.max_width,
-        args.stabilize,
         args.fade_gaps,
     )
     if not ok:
