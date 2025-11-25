@@ -61,26 +61,20 @@ jobs:
           DAYS: ${{ github.event.inputs.days_back }}
           FPS_IN: ${{ github.event.inputs.fps }}
           MAX_W: ${{ github.event.inputs.max_width }}
-          RUN_ID: ${{ github.run_id }}
-          GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           echo "Camera folder : ${CAMERA}"
           echo "Days back     : ${DAYS}"
           echo "FPS           : ${FPS_IN}"
           echo "Max width     : ${MAX_W}"
 
-          OUT_MP4="timelapses/timelapse_${CAMERA}_last${DAYS}d_run${RUN_ID}.mp4"
-          OUT_TXT="timelapses/timelapse_${CAMERA}_last${DAYS}d_run${RUN_ID}.txt"
-
+          OUT_MP4="timelapses/timelapse_${CAMERA}_last${DAYS}d.mp4"
           echo "Output video  : ${OUT_MP4}"
-          echo "Info file     : ${OUT_TXT}"
 
           python -u scripts/create_timelapse.py \
             --camera "${CAMERA}" \
             --days "${DAYS}" \
             --fps "${FPS_IN}" \
             --max-width "${MAX_W}" \
-            --stabilize \
             --fade-gaps \
             --output "${OUT_MP4}"
 
@@ -94,19 +88,7 @@ jobs:
           echo "Timelapse created at: ${OUT_MP4}"
           ls -l "${OUT_MP4}"
 
-          # Write a small info file with metadata + run link
-          {
-            echo "camera=${CAMERA}"
-            echo "days_back=${DAYS}"
-            echo "fps=${FPS_IN}"
-            echo "max_width=${MAX_W}"
-            echo "run_id=${RUN_ID}"
-            echo "run_url=${GITHUB_RUN_URL}"
-            echo "output_video=${OUT_MP4}"
-          } > "${OUT_TXT}"
-
-          echo "Info file contents:"
-          cat "${OUT_TXT}"
+          echo "video_path=${OUT_MP4}" >> "$GITHUB_OUTPUT"
 
       - name: Publish timelapse as GitHub Release
         uses: softprops/action-gh-release@v2
