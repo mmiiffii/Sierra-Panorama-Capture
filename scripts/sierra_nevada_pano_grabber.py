@@ -22,6 +22,7 @@ import re
 import argparse
 import pathlib
 import hashlib
+import tempfile
 from urllib.parse import urlparse, parse_qs
 from datetime import datetime
 
@@ -150,7 +151,6 @@ def try_ui_download(page, name: str, tz: str) -> tuple[pathlib.Path, bytes] | No
             if ext not in (".jpg",".jpeg",".png"):
                 return None
             # Save to temp location first to read bytes
-            import tempfile
             with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
                 tmp_path = pathlib.Path(tmp.name)
             dl.save_as(str(tmp_path))
@@ -158,7 +158,6 @@ def try_ui_download(page, name: str, tz: str) -> tuple[pathlib.Path, bytes] | No
             tmp_path.unlink()
             
             out = out_path(name, tz, ext)
-            out.parent.mkdir(parents=True, exist_ok=True)
             return (out, data)
         except PWTimeout:
             if not tried_share:
@@ -205,7 +204,6 @@ def try_link_scrape(page, name: str, tz: str) -> tuple[pathlib.Path, bytes] | No
         m = re.search(r"\.(jpg|jpeg|png)(\?.*)?$", href, re.I)
         ext = "." + (m.group(1).lower() if m else "jpg")
         out = out_path(name, tz, ext)
-        out.parent.mkdir(parents=True, exist_ok=True)
         return (out, data)
     return None
 
@@ -245,7 +243,6 @@ def grab_one(url: str, name: str, tz: str) -> int:
             return 0
         
         # Save the new image
-        out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(data)
         write_last_hash(name, current_hash)
         print(f"[pano] saved → {out_path}")
