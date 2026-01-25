@@ -21,6 +21,8 @@ import os
 import re
 import argparse
 import pathlib
+import hashlib
+import tempfile
 from urllib.parse import urlparse, parse_qs
 from datetime import datetime
 
@@ -34,6 +36,7 @@ except Exception:
 # ---------- config ----------
 DEFAULT_TZ = os.environ.get("CAM_TZ", "Europe/Madrid")
 TARGET_ROOT = pathlib.Path("images/panoramas")
+STATE_DIR = pathlib.Path("state")
 
 CONSENT_LABELS = [
     "Accept all","Accept & continue","Akzeptieren","Alle akzeptieren",
@@ -64,6 +67,31 @@ def out_path(name: str, tz: str, ext: str = ".jpg") -> pathlib.Path:
 
 def ensure_dirs(name: str):
     (TARGET_ROOT / name).mkdir(parents=True, exist_ok=True)
+
+def sha1_hex(data: bytes) -> str:
+    """Compute SHA-1 hash of bytes."""
+    h = hashlib.sha1()
+    h.update(data)
+    return h.hexdigest()
+
+def state_path(name: str) -> pathlib.Path:
+    """Path to the state file storing last image hash."""
+    return STATE_DIR / f"{name}_pano.sha1"
+
+def read_last_hash(name: str) -> str | None:
+    """Read the last saved image hash from state file."""
+    p = state_path(name)
+    if p.exists():
+        try:
+            return p.read_text(encoding="utf-8").strip() or None
+        except Exception:
+            return None
+    return None
+
+def write_last_hash(name: str, hexval: str):
+    """Write the image hash to state file."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    state_path(name).write_text(hexval + "\n", encoding="utf-8")
 
 def click_text(page, text: str, timeout=2500) -> bool:
     try:
@@ -103,7 +131,7 @@ def open_share(page):
             return True
     return False
 
-def try_ui_download(page, name: str, tz: str) -> pathlib.Path | None:
+def try_ui_download(page, name: str, tz: str) -> tuple[pathlib.Path, bytes] | None:
     """Preferred path: capture Playwright download when clicking 'Download'."""
     tried_share = False
     for _ in range(2):
@@ -122,15 +150,15 @@ def try_ui_download(page, name: str, tz: str) -> pathlib.Path | None:
             ext = pathlib.Path(suggested).suffix or ".jpg"
             if ext not in (".jpg",".jpeg",".png"):
                 return None
+            # Save to temp location first to read bytes
+            with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+                tmp_path = pathlib.Path(tmp.name)
+            dl.save_as(str(tmp_path))
+            data = tmp_path.read_bytes()
+            tmp_path.unlink()
+            
             out = out_path(name, tz, ext)
-            out.parent.mkdir(parents=True, exist_ok=True)
-            final = out
-            i = 1
-            while final.exists():
-                final = out.with_name(out.stem + f"_{i}" + out.suffix)
-                i += 1
-            dl.save_as(str(final))
-            return final
+            return (out, data)
         except PWTimeout:
             if not tried_share:
                 open_share(page)
@@ -138,7 +166,7 @@ def try_ui_download(page, name: str, tz: str) -> pathlib.Path | None:
                 continue
             return None
 
-def try_link_scrape(page, name: str, tz: str) -> pathlib.Path | None:
+def try_link_scrape(page, name: str, tz: str) -> tuple[pathlib.Path, bytes] | None:
     """
     Fallback: look for <a href="*.jpg|*.jpeg|*.png"> in the UI and fetch it via Playwright's context.
     """
@@ -176,14 +204,7 @@ def try_link_scrape(page, name: str, tz: str) -> pathlib.Path | None:
         m = re.search(r"\.(jpg|jpeg|png)(\?.*)?$", href, re.I)
         ext = "." + (m.group(1).lower() if m else "jpg")
         out = out_path(name, tz, ext)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        final = out
-        i = 1
-        while final.exists():
-            final = out.with_name(out.stem + f"_{i}" + out.suffix)
-            i += 1
-        final.write_bytes(data)
-        return final
+        return (out, data)
     return None
 
 def grab_one(url: str, name: str, tz: str) -> int:
@@ -205,18 +226,30 @@ def grab_one(url: str, name: str, tz: str) -> int:
         # allow UI to switch
         page.wait_for_timeout(1200)
 
-        out = try_ui_download(page, name, tz)
-        if not out:
-            out = try_link_scrape(page, name, tz)
+        result = try_ui_download(page, name, tz)
+        if not result:
+            result = try_link_scrape(page, name, tz)
 
         ctx.close(); browser.close()
 
-    if out:
-        print(f"[pano] saved → {out}")
+    if result:
+        out_path, data = result
+        # Check if image is identical to last saved
+        current_hash = sha1_hex(data)
+        last_hash = read_last_hash(name)
+        
+        if current_hash == last_hash:
+            print(f"[pano] image unchanged (hash={current_hash[:8]}...) — skipping save")
+            return 0
+        
+        # Save the new image
+        out_path.write_bytes(data)
+        write_last_hash(name, current_hash)
+        print(f"[pano] saved → {out_path}")
         return 0
     else:
         print("[pano] no image download found (maybe skin changed or video-only)")
-        return 3
+        return 0  # Changed from 3 to 0 - not finding an image is not an error
 
 def main():
     ap = argparse.ArgumentParser()
