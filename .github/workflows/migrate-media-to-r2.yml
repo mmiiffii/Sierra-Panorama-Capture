@@ -1,0 +1,147 @@
+name: Migrate media to Cloudflare R2
+
+on:
+  workflow_dispatch:
+    inputs:
+      paths:
+        description: "Space-separated repo paths to migrate"
+        required: true
+        default: "images state"
+      limit:
+        description: "Test limit. Use 10 for a small test, 0 for all files."
+        required: true
+        default: "0"
+      skip_existing:
+        description: "Skip objects that already exist in R2"
+        required: true
+        default: "true"
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_PREFIX: sierra-panorama-capture
+
+    steps:
+      - name: Install upload tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y awscli
+
+      - name: List repo files without downloading the media blobs
+        run: |
+          set -euo pipefail
+
+          REF_NAME="${GITHUB_REF_NAME:-main}"
+          PATHS="${{ github.event.inputs.paths }}"
+          LIMIT="${{ github.event.inputs.limit }}"
+
+          git init repo-list
+          cd repo-list
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --depth=1 --filter=blob:none origin "$REF_NAME"
+          COMMIT_SHA="$(git rev-parse FETCH_HEAD)"
+          echo "COMMIT_SHA=$COMMIT_SHA" >> "$GITHUB_ENV"
+
+          # shellcheck disable=SC2086
+          git ls-tree -r --name-only FETCH_HEAD -- $PATHS > ../files-all.txt || true
+          cd ..
+
+          if [ "$LIMIT" != "0" ] && [ -n "$LIMIT" ]; then
+            head -n "$LIMIT" files-all.txt > files.txt
+          else
+            cp files-all.txt files.txt
+          fi
+
+          echo "Files selected:"
+          wc -l files.txt
+          echo "First files:"
+          head -20 files.txt || true
+
+      - name: Stream each file from GitHub to R2
+        run: |
+          set -euo pipefail
+
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          SKIP_EXISTING="${{ github.event.inputs.skip_existing }}"
+
+          content_type_for() {
+            case "$1" in
+              *.jpg|*.jpeg) echo "image/jpeg" ;;
+              *.png) echo "image/png" ;;
+              *.webp) echo "image/webp" ;;
+              *.mp4) echo "video/mp4" ;;
+              *.json) echo "application/json" ;;
+              *.txt|*.sha1) echo "text/plain" ;;
+              *.html) echo "text/html" ;;
+              *.css) echo "text/css" ;;
+              *.js) echo "application/javascript" ;;
+              *) echo "application/octet-stream" ;;
+            esac
+          }
+
+          count=0
+          skipped=0
+          failed=0
+
+          while IFS= read -r path; do
+            [ -z "$path" ] && continue
+
+            key="${R2_PREFIX}/${path}"
+
+            if [ "$SKIP_EXISTING" = "true" ]; then
+              if aws s3api head-object \
+                --bucket "$R2_BUCKET" \
+                --key "$key" \
+                --endpoint-url "$ENDPOINT" >/dev/null 2>&1; then
+                echo "Skip existing: $key"
+                skipped=$((skipped + 1))
+                continue
+              fi
+            fi
+
+            encoded_path="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe="/"))' "$path")"
+            raw_url="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${COMMIT_SHA}/${encoded_path}"
+            content_type="$(content_type_for "$path")"
+            tmp="$(mktemp)"
+
+            echo "Upload: $path -> r2://${R2_BUCKET}/${key}"
+
+            if curl -fsSL --retry 3 --retry-delay 2 "$raw_url" -o "$tmp"; then
+              if aws s3 cp "$tmp" "s3://${R2_BUCKET}/${key}" \
+                --endpoint-url "$ENDPOINT" \
+                --content-type "$content_type" \
+                --only-show-errors; then
+                count=$((count + 1))
+              else
+                echo "AWS upload failed: $path"
+                failed=$((failed + 1))
+              fi
+            else
+              echo "GitHub raw download failed: $path"
+              failed=$((failed + 1))
+            fi
+
+            rm -f "$tmp"
+
+            if [ $(((count + skipped + failed) % 100)) -eq 0 ]; then
+              echo "Progress: uploaded=$count skipped=$skipped failed=$failed"
+            fi
+          done < files.txt
+
+          echo "Finished. uploaded=$count skipped=$skipped failed=$failed"
+
+          if [ "$failed" != "0" ]; then
+            exit 1
+          fi
